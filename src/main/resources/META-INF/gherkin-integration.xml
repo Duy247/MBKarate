@@ -39,5 +39,9 @@
 
         <annotator  language="Gherkin"
                                    implementationClass="com.mb.mbplugin.karate.documentation.KarateCallReadAnnotator"/>
+                                   
+                
+        <annotator language="Gherkin"
+                implementationClass="com.mb.mbplugin.karate.navigation.KarateMissingFeatureAnnotator"/>
     </extensions>
 </idea-plugin>

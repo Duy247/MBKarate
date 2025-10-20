@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.2.3"
+version = "1.3.0"
 
 repositories {
     mavenLocal()    
@@ -33,7 +33,7 @@ dependencies {
         
         // The required plugins are defined in plugin.xml
     }
-    implementation("com.duy.karate.test:karate-feature-demo:1.0-SNAPSHOT")
+    // implementation("com.duy.karate.test:karate-feature-demo:1.0-SNAPSHOT")
 }
 
 intellijPlatform {
@@ -43,10 +43,11 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.2.3</h3>
+            <h3>Version 1.3.0</h3>
             <ul>
-              <li>Minor change: Fix tag suggestion trigger to !</li>
-              <li>Minor change: Fix permissiveness of autocomplete trigger</li>
+              <li>Major change: major overhaul for docview</li>
+              <li>Major change: major overhaul for run test</li>
+              <li>Major change: major overhaul for suggestion</li>
             </ul>
         """.trimIndent()
     }

@@ -21,11 +21,26 @@ class KarateCallReadAnnotator : Annotator {
 
     private val processedElements = mutableSetOf<Int>()
     override fun annotate(element: PsiElement, holder: AnnotationHolder) {
+        // Avoid duplicate processing
         val start = element.textOffset
         if (processedElements.contains(start)) return
         processedElements.add(start)
-        val text = element.text ?: return
-        val matcher = CALL_READ_PATTERN.matcher(text)
+
+        // Only process if this element is part of a "call read(" line
+        val textFragment = element.text
+        if (!textFragment.contains("call read(")) return
+
+        // --- 🧠 Combine sibling text fragments (handles <a>, <type>, etc.) ---
+        val combinedText = buildString {
+            var current: PsiElement? = element
+            while (current != null && !current.text.contains("\n")) {
+                append(current.text)
+                current = current.nextSibling
+            }
+        }
+
+        // --- Match the call read pattern ---
+        val matcher = CALL_READ_PATTERN.matcher(combinedText)
         if (!matcher.find()) return
 
         val featurePath = matcher.group(1)
@@ -44,7 +59,7 @@ class KarateCallReadAnnotator : Annotator {
 
         val providedParams = extractParamsFromBlock(paramsBlock)
 
-        // Check for unexpected params
+        // --- Check for unexpected params ---
         for (param in providedParams) {
             if (param !in allowedParams) {
                 holder.newAnnotation(
@@ -54,7 +69,7 @@ class KarateCallReadAnnotator : Annotator {
             }
         }
 
-        // Check for missing params
+        // --- Check for missing params ---
         for (required in allowedParams) {
             if (required !in providedParams) {
                 holder.newAnnotation(
@@ -64,6 +79,7 @@ class KarateCallReadAnnotator : Annotator {
             }
         }
     }
+
 
     private fun extractParamsFromBlock(paramsText: String): List<String> {
         // Parse simple Karate-style key:value pairs

@@ -57,7 +57,6 @@ class KarateGoToSymbolProvider : GotoDeclarationHandler {
         val module = ModuleUtilCore.findModuleForFile(containingFile) ?: return emptyArray()
         val psiManager = PsiManager.getInstance(sourceElement.project)
 
-        // Include both source and library roots
         val allRoots = ModuleRootManager.getInstance(module).getSourceRoots(true).toList()
 
         val featurePath = filePaths.firstOrNull() ?: return emptyArray()
