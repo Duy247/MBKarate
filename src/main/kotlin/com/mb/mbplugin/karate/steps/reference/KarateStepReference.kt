@@ -55,7 +55,7 @@ class KarateStepReference(
 
         // Search globally for similar elements
         val searchHelper = PsiSearchHelper.getInstance(project)
-        val scope = GlobalSearchScope.projectScope(project)
+        val scope = GlobalSearchScope.allScope(project)
         
         try {
             searchHelper.processElementsWithWord(

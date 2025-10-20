@@ -55,24 +55,38 @@ class KarateGoToSymbolProvider : GotoDeclarationHandler {
     private fun goToClasspath(sourceElement: PsiElement, filePaths: List<String>): Array<PsiElement> {
         val containingFile = sourceElement.containingFile ?: return emptyArray()
         val module = ModuleUtilCore.findModuleForFile(containingFile) ?: return emptyArray()
-        val sourceRoots = ModuleRootManager.getInstance(module).sourceRoots
         val psiManager = PsiManager.getInstance(sourceElement.project)
-        
-        val list = sourceRoots
-            .mapNotNull { it.findFileByRelativePath(filePaths[0]) }
-            .mapNotNull { psiManager.findFile(it) }
 
-        return when (filePaths.size) {
-            1 -> list.toTypedArray()
-            2 -> {
-                list.mapNotNull { f ->
-                    val textOffsetNewline = f.text.indexOf("@${filePaths[1]}\n")
-                    val textOffset = f.text.indexOf("@${filePaths[1]}")
-                    val textOffsetRet = if (textOffsetNewline == -1) textOffset else textOffsetNewline
-                    f.findElementAt(textOffsetRet)
-                }.toTypedArray()
-            }
-            else -> emptyArray()
+        // Include both source and library roots
+        val allRoots = ModuleRootManager.getInstance(module).getSourceRoots(true).toList()
+
+        val featurePath = filePaths.firstOrNull() ?: return emptyArray()
+        val tag = filePaths.getOrNull(1)
+
+        val psiFiles = allRoots.mapNotNull { root ->
+            // Try to resolve a relative file inside this root
+            val vf = com.intellij.openapi.vfs.VfsUtilCore.findRelativeFile(featurePath, root)
+            vf?.let { psiManager.findFile(it) }
         }
+
+        if (psiFiles.isEmpty()) return emptyArray()
+
+        // If no tag is given → open file(s)
+        if (tag == null) {
+            return psiFiles.toTypedArray()
+        }
+
+        // If a tag exists → find the @tag inside the PSI text
+        val results = mutableListOf<PsiElement>()
+        for (psiFile in psiFiles) {
+            val text = psiFile.text
+            val offset = text.indexOf("@$tag")
+            if (offset >= 0) {
+                psiFile.findElementAt(offset)?.let { results.add(it) }
+            }
+        }
+
+        return results.toTypedArray()
     }
+
 }

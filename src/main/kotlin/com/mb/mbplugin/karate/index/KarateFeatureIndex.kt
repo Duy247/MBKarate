@@ -26,7 +26,7 @@ class KarateFeatureIndex : FileBasedIndexExtension<String, KarateFeatureData>() 
         val NAME = ID.create<String, KarateFeatureData>("KarateFeatureIndex")
         
         fun getAllFeatureFiles(project: Project): Collection<VirtualFile> {
-            return FileTypeIndex.getFiles(GherkinFileType.INSTANCE, GlobalSearchScope.projectScope(project))
+            return FileTypeIndex.getFiles(GherkinFileType.INSTANCE, GlobalSearchScope.allScope(project))
         }
         
         fun getFeatureData(project: Project, tag: String): List<KarateFeatureData> {
@@ -37,7 +37,7 @@ class KarateFeatureIndex : FileBasedIndexExtension<String, KarateFeatureData>() 
                     result.add(value)
                     true
                 },
-                GlobalSearchScope.projectScope(project)
+                GlobalSearchScope.allScope(project)
             )
             return result
         }
@@ -52,10 +52,13 @@ class KarateFeatureIndex : FileBasedIndexExtension<String, KarateFeatureData>() 
     override fun getInputFilter(): FileBasedIndex.InputFilter {
         return object : DefaultFileTypeSpecificInputFilter(GherkinFileType.INSTANCE) {
             override fun acceptInput(file: VirtualFile): Boolean {
-                return file.extension == "feature"
+                // Accept .feature in normal folders or inside JARs
+                return file.extension == "feature" ||
+                    (file.fileSystem.protocol == "jar" && file.name.endsWith(".feature"))
             }
         }
     }
+
     
     override fun dependsOnFileContent(): Boolean = true
     
@@ -89,14 +92,13 @@ class KarateFeatureIndex : FileBasedIndexExtension<String, KarateFeatureData>() 
     private fun extractTagsFromFile(psiFile: PsiFile): List<String> {
         val tags = mutableListOf<String>()
         val text = psiFile.text
-        
-        // Enhanced regex to find tags like @login, @smoke, etc.
-        // Supports UTF-8 characters in tag names using Unicode property classes
         val tagPattern = Regex("@([\\p{L}_][\\p{L}\\p{N}_]*)")
         tagPattern.findAll(text).forEach { match ->
-            tags.add(match.groupValues[1]) // Add without @ symbol
+            val tag = match.groupValues[1]
+            if (!tag.startsWith("param", ignoreCase = true) && !tag.equals("return", ignoreCase = true) && !tag.endsWith("DOC", ignoreCase = false)) {
+                tags.add(tag)
+            }
         }
-        
         return tags.distinct()
     }
     

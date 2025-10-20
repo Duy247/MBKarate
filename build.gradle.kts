@@ -8,6 +8,7 @@ group = "com.mb"
 version = "1.2.3"
 
 repositories {
+    mavenLocal()    
     mavenCentral()
     intellijPlatform {
         defaultRepositories()
@@ -32,6 +33,7 @@ dependencies {
         
         // The required plugins are defined in plugin.xml
     }
+    implementation("com.duy.karate.test:karate-feature-demo:1.0-SNAPSHOT")
 }
 
 intellijPlatform {

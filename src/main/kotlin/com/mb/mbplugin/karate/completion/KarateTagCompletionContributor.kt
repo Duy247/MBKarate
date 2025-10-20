@@ -130,9 +130,13 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                 result.addElement(lookupElement)
             } else {
                 // This is a tag-based suggestion
-                val psiFile = com.intellij.psi.PsiManager.getInstance(project).findFile(
-                    com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(java.io.File(tagData.absolutePath), true)!!
-                )
+                val vFile = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(java.io.File(tagData.absolutePath), true)
+                    ?: com.intellij.openapi.vfs.VirtualFileManager.getInstance().findFileByUrl("jar://${tagData.absolutePath}!/")
+                val psiFile = vFile?.let { com.intellij.psi.PsiManager.getInstance(project).findFile(it) }
+                if (psiFile == null) {
+                    LOG.debug("Skipping unresolved file: ${tagData.absolutePath}")
+                    return@forEach
+                }
 
                 var paramInputs = emptyList<String>()
                 if (psiFile is com.mb.mbplugin.karate.psi.KarateFile) {
@@ -181,36 +185,59 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
     }
     
     private fun getAllMatchingItems(
-        project: com.intellij.openapi.project.Project, 
+        project: com.intellij.openapi.project.Project,
         prefix: String,
         isTagCompletion: Boolean,
         isFileCompletion: Boolean
     ): List<com.mb.mbplugin.karate.index.KarateFeatureData> {
         val result = mutableListOf<com.mb.mbplugin.karate.index.KarateFeatureData>()
-        
+
         try {
-            // Get all feature files
-            val allFeatureFiles = KarateFeatureIndex.getAllFeatureFiles(project)
-            
+            // include files from dependencies (JARs too)
+            val allFeatureFiles = com.intellij.psi.search.FileTypeIndex.getFiles(
+                org.jetbrains.plugins.cucumber.psi.GherkinFileType.INSTANCE,
+                com.intellij.psi.search.GlobalSearchScope.allScope(project)
+            )
+
             allFeatureFiles.forEach { virtualFile ->
                 try {
                     val psiFile = com.intellij.psi.PsiManager.getInstance(project).findFile(virtualFile)
-                    if (psiFile != null) {
-                        val relativePath = getRelativePathFromSourceRoot(project, virtualFile)
-                        
-                        // Debug logging for path issues
-                        LOG.debug("Processing file: ${virtualFile.path}")
-                        LOG.debug("Relative path: $relativePath")
-                        
-                        if (isTagCompletion) {
-                            // Tag-based completion - find tags that contain the prefix
-                            val tags = extractTagsFromFile(psiFile.text)
-                            LOG.debug("Found tags: $tags")
-                            
-                            // Filter tags that contain the prefix anywhere in the tag name (case insensitive)
-                            tags.filter { tag -> 
-                                prefix.isEmpty() || tag.contains(prefix, ignoreCase = true)
-                            }.forEach { tag ->
+
+                    val fileText = runCatching {
+                        val psiText = psiFile?.text.orEmpty()
+                        if (psiText.isNotBlank()) psiText
+                        else virtualFile.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    }.getOrNull() ?: return@forEach
+
+
+                    val relativePath = getRelativePathFromSourceRoot(project, virtualFile)
+
+                    if (isTagCompletion) {
+                        val tags = extractTagsFromFile(fileText)
+                        tags.filter { tag ->
+                            prefix.isEmpty() || tag.contains(prefix, ignoreCase = true)
+                        }.forEach { tag ->
+                            result.add(
+                                com.mb.mbplugin.karate.index.KarateFeatureData(
+                                    relativePath, tag, virtualFile.path
+                                )
+                            )
+                        }
+                    }
+
+                    if (isFileCompletion) {
+                        val fileName = virtualFile.nameWithoutExtension
+                        if (prefix.isEmpty() || fileName.contains(prefix, ignoreCase = true)) {
+                            // add the feature file itself
+                            result.add(
+                                com.mb.mbplugin.karate.index.KarateFeatureData(
+                                    relativePath, "", virtualFile.path
+                                )
+                            )
+
+                            // add all its tags
+                            val tags = extractTagsFromFile(fileText)
+                            tags.forEach { tag ->
                                 result.add(
                                     com.mb.mbplugin.karate.index.KarateFeatureData(
                                         relativePath, tag, virtualFile.path
@@ -218,42 +245,18 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                                 )
                             }
                         }
-                        
-                        if (isFileCompletion) {
-                            // Feature file name-based suggestions (only when # is used)
-                            val fileName = virtualFile.nameWithoutExtension
-                            if (prefix.isEmpty() || fileName.contains(prefix, ignoreCase = true)) {
-                                // 1. Create entry for the feature file itself
-                                result.add(
-                                    com.mb.mbplugin.karate.index.KarateFeatureData(
-                                        relativePath, "", virtualFile.path
-                                    )
-                                )
-                                
-                                // 2. Create entries for ALL tags from this matching file
-                                val tags = extractTagsFromFile(psiFile.text)
-                                tags.forEach { tag ->
-                                    result.add(
-                                        com.mb.mbplugin.karate.index.KarateFeatureData(
-                                            relativePath, tag, virtualFile.path
-                                        )
-                                    )
-                                }
-                            }
-                        }
                     }
-                } catch (e: Exception) {
-                    // Ignore individual file errors
+                } catch (_: Exception) {
+                    // ignore errors from individual files
                 }
             }
-        } catch (e: Exception) {
-            // Ignore errors
+        } catch (_: Exception) {
+            // ignore general errors
         }
-        
-        // Return unique entries - only remove duplicates where the same tag appears multiple times in the same file
-        // But allow the same tag to appear from different files
+
         return result.distinctBy { "${it.absolutePath}@${it.tag}" }
     }
+
 
     private fun handleTagInsertion(insertContext: com.intellij.codeInsight.completion.InsertionContext, suggestion: String) {
         val document = insertContext.document
@@ -355,16 +358,14 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
     
     private fun extractTagsFromFile(text: String): List<String> {
         val tags = mutableListOf<String>()
-        
-        // Enhanced regex to find tags like @login, @smoke, etc. 
-        // Supports UTF-8 characters in tag names using Unicode property classes:
-        // \p{L} = any Unicode letter (supports accented characters, Asian characters, etc.)
-        // \p{N} = any Unicode number
         val tagPattern = Regex("(?:^|\\s)@([\\p{L}_][\\p{L}\\p{N}_]*)", RegexOption.MULTILINE)
         tagPattern.findAll(text).forEach { match ->
-            tags.add(match.groupValues[1]) // Add without @ symbol
+            val tag = match.groupValues[1]
+            // Filter out documentation markers like @param, @param_input, @return, etc.
+            if (!tag.startsWith("param", ignoreCase = true) && !tag.equals("return", ignoreCase = true) && !tag.endsWith("DOC", ignoreCase = false)) {
+                tags.add(tag)
+            }
         }
-        
         return tags.distinct()
     }
     
