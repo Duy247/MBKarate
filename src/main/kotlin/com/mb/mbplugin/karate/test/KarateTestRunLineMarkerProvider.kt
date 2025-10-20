@@ -66,13 +66,32 @@ class KarateTestRunLineMarkerProvider : LineMarkerProvider {
             element.textRange,
             TEST_RUN_ICON,
             { tooltipText },
-            { _, _ ->
-                // Update TestRunner.java with tag and file path
-                writeTestRunInfo(tagElement, tagText)
+            { mouseEvent, _ ->
+                val popup = com.intellij.openapi.ui.popup.JBPopupFactory.getInstance()
+                    .createPopupChooserBuilder(listOf("Run Test", "Debug Test"))
+                    .setTitle("Karate Test Options")
+                    .setItemChosenCallback { choice ->
+                        when (choice) {
+                            "Run Test" -> writeTestRunInfo(tagElement, tagText, debug = false)
+                            "Debug Test" -> writeTestRunInfo(tagElement, tagText, debug = true)
+                        }
+                    }
+                    .createPopup()
+
+                if (mouseEvent != null) {
+                    val component = mouseEvent.component
+                    val point = mouseEvent.point
+                    val screenPoint = java.awt.Point(point)
+                    javax.swing.SwingUtilities.convertPointToScreen(screenPoint, component)
+                    screenPoint.y += 10 // show just below the gutter icon
+                    popup.showInScreenCoordinates(component, screenPoint)
+                }
             },
             GutterIconRenderer.Alignment.CENTER,
-            { "Click to create TestRunner.java for $tagText" }
+            { "Click to run or debug Karate test for $tagText" }
         )
+
+
     }
     
     /**
@@ -117,7 +136,7 @@ class KarateTestRunLineMarkerProvider : LineMarkerProvider {
     /**
      * Write test run information to TestRunner.java file and execute the test
      */
-    private fun writeTestRunInfo(tagElement: GherkinTag, tagText: String) {
+    private fun writeTestRunInfo(tagElement: GherkinTag, tagText: String, debug: Boolean = false) {
         // Collect all PSI-related data immediately while we're in the correct thread context
         val project = tagElement.project
         val psiFile = tagElement.containingFile
@@ -193,7 +212,7 @@ class {{CLASS_NAME}} {
                         // Execute the test on EDT
                         ApplicationManager.getApplication().invokeLater {
                             ApplicationManager.getApplication().runReadAction {
-                                runJUnitTest(project, testRunnerFile)
+                                runJUnitTest(project, testRunnerFile,debug)
                             }
                         }
                     }
@@ -231,55 +250,49 @@ class {{CLASS_NAME}} {
     /**
      * Run JUnit test for the created TestRunner file
      */
-    private fun runJUnitTest(project: Project, testRunnerFile: File) {
+    private fun runJUnitTest(project: Project, testRunnerFile: File, debug: Boolean = false) {
         try {
-            // Refresh the virtual file system to ensure the new file is visible
+            // Refresh VFS to ensure new file is visible
             VirtualFileManager.getInstance().syncRefresh()
-            
-            // Find the virtual file for the created Java file
-            val virtualFile = VirtualFileManager.getInstance().findFileByUrl("file://${testRunnerFile.absolutePath.replace('\\', '/')}")
+
+            val virtualFile = VirtualFileManager.getInstance()
+                .findFileByUrl("file://${testRunnerFile.absolutePath.replace('\\', '/')}")
             if (virtualFile == null) {
                 println("Error: Could not find virtual file for ${testRunnerFile.absolutePath}")
                 return
             }
-            
-            // Execute the test in the UI thread
+
+            // Execute on EDT
             ApplicationManager.getApplication().invokeLater {
                 try {
                     val runManager = RunManager.getInstance(project)
-                    
-                    // Get JUnit configuration type
                     val junitConfigType = JUnitConfigurationType.getInstance()
                     val junitFactory = junitConfigType.factory
-                    
-                    // Get the PSI file and find the test class
+
                     val psiFile = PsiManager.getInstance(project).findFile(virtualFile)
                     if (psiFile !is PsiJavaFile) {
                         println("Error: File is not a Java file")
                         openFileInEditor(project, virtualFile)
                         return@invokeLater
                     }
-                    
+
                     val testClass = psiFile.classes.firstOrNull()
                     if (testClass == null) {
-                        println("Error: No class found in the Java file")
+                        println("Error: No class found in Java file")
                         openFileInEditor(project, virtualFile)
                         return@invokeLater
                     }
-                    
-                    // Create JUnit configuration
+
                     val junitConfig = JUnitConfiguration("Karate Test - ${testClass.name}", project, junitFactory)
-                    
-                    // Configure the JUnit test to run the specific class
                     val junitData = junitConfig.persistentData
                     junitData.TEST_OBJECT = JUnitConfiguration.TEST_CLASS
                     junitData.MAIN_CLASS_NAME = testClass.qualifiedName
-                    
-                    // Add JVM parameters to fix Java 17+ compatibility issues with Truffle/GraalVM
+
+                    // Add JVM parameters for Karate compatibility
                     val currentVmParams = junitData.VM_PARAMETERS ?: ""
                     val compatibilityParams = listOf(
                         "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED",
-                        "--add-opens", "java.base/sun.misc=ALL-UNNAMED", 
+                        "--add-opens", "java.base/sun.misc=ALL-UNNAMED",
                         "--add-opens", "java.base/java.lang=ALL-UNNAMED",
                         "--add-opens", "java.base/java.lang.invoke=ALL-UNNAMED",
                         "--add-opens", "java.base/java.util=ALL-UNNAMED",
@@ -291,55 +304,56 @@ class {{CLASS_NAME}} {
                         "-Dpolyglot.engine.AllowExperimentalOptions=true",
                         "-Dgraalvm.locatorDisabled=true"
                     ).joinToString(" ")
-                    
+
                     junitData.VM_PARAMETERS = if (currentVmParams.isBlank()) {
                         "-ea $compatibilityParams"
                     } else {
                         "$currentVmParams $compatibilityParams"
                     }
-                    
-                    println("JVM Parameters set: ${junitData.VM_PARAMETERS}")
-                    println("Note: If using JDK 17+, consider switching to JDK 11 or 16 for better Karate compatibility")
-                    
-                    // Set ShortenCommandLine to avoid "Command line is too long" errors
+
                     junitConfig.setShortenCommandLine(com.intellij.execution.ShortenCommandLine.ARGS_FILE)
-                    
-                    // Set the module (using read action to avoid threading violations)
+
                     val module = ReadAction.compute<com.intellij.openapi.module.Module?, Throwable> {
                         ModuleUtil.findModuleForFile(virtualFile, project)
                     }
                     if (module != null) {
                         junitConfig.setModule(module)
                     }
-                    
-                    // Create run configuration settings
+
                     val settings = runManager.createConfiguration(junitConfig, junitFactory)
                     settings.name = "Karate Test - ${testClass.name}"
-                    
-                    // Add and execute the configuration
+
                     runManager.addConfiguration(settings)
                     runManager.selectedConfiguration = settings
-                    
-                    // Execute the configuration
-                    ProgramRunnerUtil.executeConfiguration(settings, DefaultRunExecutor.getRunExecutorInstance())
-                    
-                    println("Successfully launched JUnit test execution for: ${testClass.qualifiedName}")
-                    
+
+                    // ⚡ Run or Debug depending on popup choice
+                    val executor = if (debug)
+                        com.intellij.execution.executors.DefaultDebugExecutor.getDebugExecutorInstance()
+                    else
+                        com.intellij.execution.executors.DefaultRunExecutor.getRunExecutorInstance()
+
+                    ProgramRunnerUtil.executeConfiguration(settings, executor)
+
+                    println(
+                        if (debug)
+                            "Debugging Karate Test: ${testClass.qualifiedName}"
+                        else
+                            "Running Karate Test: ${testClass.qualifiedName}"
+                    )
+
                 } catch (e: Exception) {
-                    println("Error creating or executing JUnit test configuration: ${e.message}")
+                    println("Error creating/executing JUnit config: ${e.message}")
                     e.printStackTrace()
-                    
-                    // Fallback: Open the file in the editor
                     openFileInEditor(project, virtualFile)
                 }
             }
-            
+
         } catch (e: Exception) {
             println("Error processing test file: ${e.message}")
             e.printStackTrace()
         }
     }
-    
+
     /**
      * Open the test file in the editor as a fallback
      */
