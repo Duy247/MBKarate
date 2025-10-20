@@ -36,5 +36,8 @@
         <!-- Karate Feature Documentation Provider -->
         <lang.documentationProvider language="Gherkin"
                                    implementationClass="com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider"/>
+
+        <annotator  language="Gherkin"
+                                   implementationClass="com.mb.mbplugin.karate.documentation.KarateCallReadAnnotator"/>
     </extensions>
 </idea-plugin>

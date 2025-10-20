@@ -130,8 +130,28 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                 result.addElement(lookupElement)
             } else {
                 // This is a tag-based suggestion
-                val suggestion = "* call read('classpath:${normalizedPath}@${tagData.tag}')"
-                
+                val psiFile = com.intellij.psi.PsiManager.getInstance(project).findFile(
+                    com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(java.io.File(tagData.absolutePath), true)!!
+                )
+
+                var paramInputs = emptyList<String>()
+                if (psiFile is com.mb.mbplugin.karate.psi.KarateFile) {
+                    val docText = com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider()
+                        .extractDocumentationFromFile(psiFile, tagData.tag)
+                    if (!docText.isNullOrBlank()) {
+                        paramInputs = com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider()
+                            .extractParamInputsFromDoc(docText)
+                    }
+                }
+
+                val paramBlock = if (paramInputs.isNotEmpty()) {
+                    paramInputs.joinToString(", ", prefix = " { ", postfix = " }") { "$it: ''" }
+                } else {
+                    ""
+                }
+
+                val suggestion = "* call read('classpath:${normalizedPath}@${tagData.tag}')$paramBlock"
+                                
                 // Create a completely unique lookup string by including file path
                 val fileName = java.io.File(tagData.absolutePath).nameWithoutExtension
                 val uniqueLookupString = "!${tagData.tag}__${fileName}__${System.nanoTime()}"
