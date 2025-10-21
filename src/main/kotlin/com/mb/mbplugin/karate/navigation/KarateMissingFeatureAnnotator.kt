@@ -28,7 +28,7 @@ class KarateMissingFeatureAnnotator : Annotator {
 
     // Support literal src/...json or src/...feature
     private val SRC_LITERAL_PATTERN = Pattern.compile(
-        "['\"](src(?:/|\\\\)[^'\"]+\\.(?:feature|json|txt))['\"]",
+        "['\"](src(?:/|\\\\)[^'\"]+\\.(?:feature|json|txt))(?:@[\\w-]+)?['\"]",
         Pattern.CASE_INSENSITIVE
     )
 
@@ -68,7 +68,7 @@ class KarateMissingFeatureAnnotator : Annotator {
         }
 
         if (anyProblem) {
-            holder.newAnnotation(HighlightSeverity.ERROR, "File not found in project").range(element.textRange).create()
+            holder.newAnnotation(HighlightSeverity.WARNING, "File not found in project").range(element.textRange).create()
         }
     }
 
