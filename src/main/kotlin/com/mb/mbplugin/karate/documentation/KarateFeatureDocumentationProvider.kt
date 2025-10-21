@@ -42,26 +42,39 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
         val body: String,
         val params: List<String>,
         val paramInputs: List<String>,
-        val returns: List<String>
+        val returns: List<String>,
+        val snippetBefore: String?,
+        val snippetAfter: String?
     )
 
     public fun parseDocDirectives(documentation: String): DocParseResult {
         val paramRegex = Regex("^\\s*@param\\s+(\\S+)", RegexOption.MULTILINE)
         val paramInputRegex = Regex("^\\s*@param_input\\s+(\\S+)", RegexOption.MULTILINE)
         val returnRegex = Regex("^\\s*@return\\s+(\\S+)", RegexOption.MULTILINE)
-
+        val snippetBeforeRegex = Regex(
+            "@snippet_before\\s+([\\s\\S]*?)(?=^\\s*@\\w+|\\Z)",
+            setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
+        )
+        val snippetAfterRegex = Regex(
+            "@snippet_after\\s+([\\s\\S]*?)(?=^\\s*@\\w+|\\Z)",
+            setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
+        )
         val params = paramRegex.findAll(documentation).map { it.groupValues[1] }.toList()
         val paramInputs = paramInputRegex.findAll(documentation).map { it.groupValues[1] }.toList()
         val returns = returnRegex.findAll(documentation).map { it.groupValues[1] }.toList()
+        val snippetBefore = snippetBeforeRegex.find(documentation)?.groupValues?.get(1)?.trim()
+        val snippetAfter = snippetAfterRegex.find(documentation)?.groupValues?.get(1)?.trim()
 
         // Remove directive lines from body
         var body = documentation
             .replace(paramRegex, "")
             .replace(paramInputRegex, "")
             .replace(returnRegex, "")
+            .replace(snippetBeforeRegex, "")
+            .replace(snippetAfterRegex, "")
             .trim()
 
-        return DocParseResult(body, params, paramInputs, returns)
+        return DocParseResult(body, params, paramInputs, returns, snippetBefore, snippetAfter)
     }
 
     override fun generateDoc(element: PsiElement?, originalElement: PsiElement?): String? {
@@ -244,29 +257,38 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
 
             // Required predefined variables
             if (parsed.params.isNotEmpty()) {
-                append("<br><b>Required Variables:</b><ul>")
+                append("<br><b>Predefined Variables: </b>— must be predefined or optionally passed<ul>")
                 parsed.params.forEach { param ->
-                    append("<li><code>${escapeHtml(param)}</code> — must be predefined before calling</li>")
+                    append("<li><code>${escapeHtml(param)}</code> </li>")
                 }
                 append("</ul>")
             }
 
             // Inputs passed via call read
             if (parsed.paramInputs.isNotEmpty()) {
-                append("<br><b>Direct Inputs:</b><ul>")
+                append("<br><b>Direct Inputs: </b> — must be passed with <code>call read()</code><ul>")
                 parsed.paramInputs.forEach { param ->
-                    append("<li><code>${escapeHtml(param)}</code> — must be passed when calling <code>call read()</code></li>")
+                    append("<li><code>${escapeHtml(param)}</code></li>")
                 }
                 append("</ul>")
             }
 
             // Return values
             if (parsed.returns.isNotEmpty()) {
-                append("<br><b>Returns:</b><ul>")
+                append("<br><b>Returns:</b>  — output variable from this scenario<ul>")
                 parsed.returns.forEach { ret ->
-                    append("<li><code>${escapeHtml(ret)}</code> — output variable from this scenario</li>")
+                    append("<li><code>${escapeHtml(ret)}</code></li>")
                 }
                 append("</ul>")
+            }
+
+            if (!parsed.snippetBefore.isNullOrBlank()) {
+                val normalizedBefore = removeLeadingIndentation(parsed.snippetBefore!!)
+                append("<br><b>Snippet Before:</b><pre>${escapeHtml(normalizedBefore)}</pre>")
+            }
+            if (!parsed.snippetAfter.isNullOrBlank()) {
+                val normalizedAfter = removeLeadingIndentation(parsed.snippetAfter!!)
+                append("<br><b>Snippet After:</b><pre>${escapeHtml(normalizedAfter)}</pre>")
             }
 
             append("</body></html>")

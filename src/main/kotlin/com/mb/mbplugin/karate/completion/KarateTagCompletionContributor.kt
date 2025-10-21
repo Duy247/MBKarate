@@ -138,13 +138,19 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                     return@forEach
                 }
 
+                var snippetBefore: String? = null
+                var snippetAfter: String? = null
+
+
                 var paramInputs = emptyList<String>()
                 if (psiFile is com.mb.mbplugin.karate.psi.KarateFile) {
-                    val docText = com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider()
-                        .extractDocumentationFromFile(psiFile, tagData.tag)
+                    val docProvider = com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider()
+                    val docText = docProvider.extractDocumentationFromFile(psiFile, tagData.tag)
                     if (!docText.isNullOrBlank()) {
-                        paramInputs = com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider()
-                            .extractParamInputsFromDoc(docText)
+                        val parsed = docProvider.parseDocDirectives(docText)
+                        paramInputs = parsed.paramInputs
+                        snippetBefore = parsed.snippetBefore
+                        snippetAfter = parsed.snippetAfter
                     }
                 }
 
@@ -154,8 +160,24 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                     ""
                 }
 
-                val suggestion = "* call read('classpath:${normalizedPath}@${tagData.tag}')$paramBlock"
-                                
+
+                val callReadLine = "* call read('classpath:${normalizedPath}@${tagData.tag}')$paramBlock"
+
+                val fullSuggestion = buildString {
+                    val safeBefore = snippetBefore?.replace("'''", "\"\"\"")
+                    val safeAfter = snippetAfter?.replace("'''", "\"\"\"")
+
+                    if (!safeBefore.isNullOrBlank()) {
+                        append(removeLeadingIndentation(safeBefore.trimEnd()))
+                        if (!safeBefore.trimEnd().endsWith("\n")) append("\n")
+                    }
+                    append(callReadLine)
+                    if (!safeAfter.isNullOrBlank()) {
+                        append("\n")
+                        append(removeLeadingIndentation(safeAfter.trimStart()))
+                    }
+                }
+   
                 // Create a completely unique lookup string by including file path
                 val fileName = java.io.File(tagData.absolutePath).nameWithoutExtension
                 val uniqueLookupString = "!${tagData.tag}__${fileName}__${System.nanoTime()}"
@@ -172,10 +194,10 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                         // Use the appropriate handler based on which trigger was used
                         if (isFileCompletion) {
                             // If triggered by #, use feature file insertion handler
-                            handleFeatureFileInsertion(insertContext, suggestion, isTagCompletion, isFileCompletion)
+                            handleFeatureFileInsertion(insertContext, fullSuggestion, isTagCompletion, isFileCompletion)
                         } else {
                             // If triggered by !, use tag insertion handler
-                            handleTagInsertion(insertContext, suggestion)
+                            handleTagInsertion(insertContext, fullSuggestion)
                         }
                     }
                 
@@ -258,18 +280,38 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
     }
 
 
-    private fun handleTagInsertion(insertContext: com.intellij.codeInsight.completion.InsertionContext, suggestion: String) {
+    private fun handleTagInsertion(
+        insertContext: com.intellij.codeInsight.completion.InsertionContext,
+        suggestion: String
+    ) {
         val document = insertContext.document
         val startOffset = insertContext.startOffset
         val tailOffset = insertContext.tailOffset
-        
+
         // Remove what was just inserted by the completion system
         document.deleteString(startOffset, tailOffset)
-        
-        // Find and replace the !tag pattern
+
+        // --- Determine base indent of the current line ---
+        val lineNumber = document.getLineNumber(startOffset)
+        val lineStartOffset = document.getLineStartOffset(lineNumber)
+        val currentLinePrefix = document.getText(
+            com.intellij.openapi.util.TextRange(lineStartOffset, startOffset)
+        )
+        val baseIndent = currentLinePrefix.takeWhile { it.isWhitespace() }
+
+        // --- Apply base indent to all lines EXCEPT the first ---
+        val lines = suggestion.lines()
+        val indentedSuggestion = buildString {
+            lines.forEachIndexed { index, line ->
+                if (index == 0) append(line.trimStart())
+                else append("\n").append(baseIndent).append(line.trimStart())
+            }
+        }
+
+        // --- Find and replace the !tag pattern ---
         val currentText = document.text
         var replaceStart = startOffset - 1
-        
+
         // Go backwards to find the ! symbol
         while (replaceStart >= 0 && currentText[replaceStart] != '!') {
             val char = currentText[replaceStart]
@@ -278,25 +320,24 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
             }
             replaceStart--
         }
-        
+
         // If we found !, replace from there
         if (replaceStart >= 0 && currentText[replaceStart] == '!') {
             var replaceEnd = replaceStart + 1
-            // Find end of tag
-            while (replaceEnd < currentText.length && 
-                   (currentText[replaceEnd].isLetterOrDigit() || 
-                    currentText[replaceEnd] == '_' || 
-                    Character.isLetter(currentText[replaceEnd]))) {
+            while (replaceEnd < currentText.length &&
+                (currentText[replaceEnd].isLetterOrDigit() ||
+                        currentText[replaceEnd] == '_' ||
+                        Character.isLetter(currentText[replaceEnd]))
+            ) {
                 replaceEnd++
             }
-            
-            // Replace !tag with our suggestion
-            document.replaceString(replaceStart, replaceEnd, suggestion)
+            document.replaceString(replaceStart, replaceEnd, indentedSuggestion)
         } else {
-            // Fallback: just insert at current position
-            document.insertString(startOffset, suggestion)
+            document.insertString(startOffset, indentedSuggestion)
         }
     }
+
+
 
     private fun handleFeatureFileInsertion(
         insertContext: com.intellij.codeInsight.completion.InsertionContext, 
@@ -590,4 +631,17 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         LOG.debug("File completion denied: no valid context found")
         return false
     }
+
+    private fun removeLeadingIndentation(text: String, baseIndent: String = ""): String {
+        val lines = text.split("\n")
+        return buildString {
+            lines.forEachIndexed { index, line ->
+                val trimmed = line.trimStart()
+                // apply base indent to all lines
+                append(baseIndent).append(trimmed)
+                if (index != lines.lastIndex) append("\n")
+            }
+        }.trimEnd('\n', '\r')
+    }
+
 }
