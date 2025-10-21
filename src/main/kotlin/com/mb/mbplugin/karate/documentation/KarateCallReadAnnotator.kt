@@ -59,24 +59,13 @@ class KarateCallReadAnnotator : Annotator {
 
         val providedParams = extractParamsFromBlock(paramsBlock)
 
-        // --- Check for unexpected params ---
-        for (param in providedParams) {
-            if (param !in allowedParams) {
-                holder.newAnnotation(
-                    HighlightSeverity.ERROR,
-                    "Unknown parameter '$param' — not defined in DOC"
-                ).range(element.textRange).create()
-            }
-        }
-
-        // --- Check for missing params ---
-        for (required in allowedParams) {
-            if (required !in providedParams) {
-                holder.newAnnotation(
-                    HighlightSeverity.ERROR,
-                    "Missing required input parameter '$required' for DOC"
-                ).range(element.textRange).create()
-            }
+       val missing = allowedParams - providedParams
+        if (missing.isNotEmpty()) {
+            val missingList = missing.joinToString(", ")
+            holder.newAnnotation(
+                HighlightSeverity.ERROR,
+                "Missing required input parameter(s): $missingList"
+            ).range(element.textRange).create()
         }
     }
 
