@@ -17,8 +17,8 @@ class KarateMissingFeatureAnnotator : Annotator {
         LanguageAnnotators.INSTANCE.addExplicitExtension(GherkinLanguage.INSTANCE, this)
     }
 
-    private val FILE_PATH_PATTERN = Pattern.compile(
-        "['\"](classpath:([^'\"]+\\.(?:feature|json))|(?:src[/\\\\][^'\"]+\\.(?:feature|json)))['\"]",
+    private val CALL_READ_PATTERN = Pattern.compile(
+        "['\"]classpath:([^'\"]+\\.(?:feature|json))",
         Pattern.CASE_INSENSITIVE
     )
 
@@ -26,7 +26,10 @@ class KarateMissingFeatureAnnotator : Annotator {
 
     override fun annotate(element: PsiElement, holder: AnnotationHolder) {
         val start = element.textOffset
-        if (!processedElements.add(start)) return
+        if (processedElements.contains(start)) return
+        processedElements.add(start)
+
+        val text = element.text
 
         val combinedText = buildString {
             var current: PsiElement? = element
@@ -36,33 +39,23 @@ class KarateMissingFeatureAnnotator : Annotator {
             }
         }
 
-        val matcher = FILE_PATH_PATTERN.matcher(combinedText)
+        val matcher = CALL_READ_PATTERN.matcher(combinedText)
         if (!matcher.find()) return
 
-        val rawPath = matcher.group(1) ?: return
+        val featurePath = matcher.group(1) ?: return
         val project = element.project
         val containingFile = element.containingFile ?: return
         val module = ModuleUtilCore.findModuleForFile(containingFile) ?: return
         val sourceRoots = ModuleRootManager.getInstance(module).getSourceRoots(true)
 
-        val vFile = when {
-            rawPath.startsWith("classpath:", true) -> {
-                val featurePath = rawPath.removePrefix("classpath:")
-                sourceRoots.asSequence()
-                    .mapNotNull { root -> VfsUtilCore.findRelativeFile(featurePath, root) }
-                    .firstOrNull()
-            }
-            rawPath.startsWith("src/", true) || rawPath.startsWith("src\\", true) -> {
-                val baseDir = project.baseDir ?: return
-                VfsUtilCore.findRelativeFile(rawPath, baseDir)
-            }
-            else -> null
+        val found = sourceRoots.any { root ->
+            VfsUtilCore.findRelativeFile(featurePath, root) != null
         }
 
-        if (vFile == null) {
+        if (!found) {
             holder.newAnnotation(
                 HighlightSeverity.ERROR,
-                "File not found: $rawPath"
+                "File not found: classpath:$featurePath"
             ).range(element.textRange).create()
         }
     }
