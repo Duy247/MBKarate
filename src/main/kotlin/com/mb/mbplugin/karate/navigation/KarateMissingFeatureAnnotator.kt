@@ -5,10 +5,13 @@ import com.intellij.lang.annotation.Annotator
 import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.lang.LanguageAnnotators
 import com.intellij.openapi.module.ModuleUtilCore
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ModuleRootManager
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.psi.PsiElement
 import org.jetbrains.plugins.cucumber.psi.GherkinLanguage
+import java.io.File
 import java.util.regex.Pattern
 
 class KarateMissingFeatureAnnotator : Annotator {
@@ -17,46 +20,85 @@ class KarateMissingFeatureAnnotator : Annotator {
         LanguageAnnotators.INSTANCE.addExplicitExtension(GherkinLanguage.INSTANCE, this)
     }
 
-    private val CALL_READ_PATTERN = Pattern.compile(
-        "['\"]classpath:([^'\"]+\\.(?:feature|json))",
+    // Support classpath:feature and classpath:feature@tag
+    private val CLASSPATH_PATTERN = Pattern.compile(
+        "['\"]classpath:([^'\"]+\\.(?:feature|json|txt))(?:@\\w+)?['\"]",
         Pattern.CASE_INSENSITIVE
     )
 
-    private val processedElements = mutableSetOf<Int>()
+    // Support literal src/...json or src/...feature
+    private val SRC_LITERAL_PATTERN = Pattern.compile(
+        "['\"](src(?:/|\\\\)[^'\"]+\\.(?:feature|json|txt))['\"]",
+        Pattern.CASE_INSENSITIVE
+    )
+
+    private val processed = mutableSetOf<Int>()
 
     override fun annotate(element: PsiElement, holder: AnnotationHolder) {
         val start = element.textOffset
-        if (processedElements.contains(start)) return
-        processedElements.add(start)
+        if (!processed.add(start)) return
 
-        val text = element.text
-
-        val combinedText = buildString {
-            var current: PsiElement? = element
-            while (current != null && !current.text.contains("\n")) {
-                append(current.text)
-                current = current.nextSibling
+        val line = buildString {
+            var cur: PsiElement? = element
+            while (cur != null && !cur.text.contains("\n")) {
+                append(cur.text)
+                cur = cur.nextSibling
             }
         }
 
-        val matcher = CALL_READ_PATTERN.matcher(combinedText)
-        if (!matcher.find()) return
+        var anyProblem = false
 
-        val featurePath = matcher.group(1) ?: return
-        val project = element.project
-        val containingFile = element.containingFile ?: return
-        val module = ModuleUtilCore.findModuleForFile(containingFile) ?: return
-        val sourceRoots = ModuleRootManager.getInstance(module).getSourceRoots(true)
-
-        val found = sourceRoots.any { root ->
-            VfsUtilCore.findRelativeFile(featurePath, root) != null
+        // check call read('classpath:...')
+        val classpathMatcher = CLASSPATH_PATTERN.matcher(line)
+        while (classpathMatcher.find()) {
+            val path = classpathMatcher.group(1) ?: continue
+            val project = element.project
+            val file = element.containingFile ?: continue
+            val module = ModuleUtilCore.findModuleForFile(file) ?: continue
+            val okInClasspath = findInClasspathRoots(module, path)
+            val okInSrcFallback = if (!okInClasspath) findInSrcFolders(project, path) else true
+            if (!okInClasspath && !okInSrcFallback) anyProblem = true
         }
 
-        if (!found) {
-            holder.newAnnotation(
-                HighlightSeverity.ERROR,
-                "File not found: classpath:$featurePath"
-            ).range(element.textRange).create()
+        // check src/... direct reference
+        val srcMatcher = SRC_LITERAL_PATTERN.matcher(line)
+        while (srcMatcher.find()) {
+            val raw = srcMatcher.group(1) ?: continue
+            if (!existsAtProjectPath(element.project, raw)) anyProblem = true
         }
+
+        if (anyProblem) {
+            holder.newAnnotation(HighlightSeverity.ERROR, "File not found in project").range(element.textRange).create()
+        }
+    }
+
+    private fun findInClasspathRoots(module: com.intellij.openapi.module.Module, relPath: String): Boolean {
+        val norm = relPath.replace('\\', '/')
+        val roots = ModuleRootManager.getInstance(module).getSourceRoots(true)
+        return roots.any { root -> VfsUtilCore.findRelativeFile(norm, root) != null }
+    }
+
+    private fun existsAtProjectPath(project: Project, relPath: String): Boolean {
+        val base = project.basePath ?: return false
+        val norm = relPath.replace('\\', '/')
+        val f = File(base, norm).path
+        val v = LocalFileSystem.getInstance().findFileByPath(f)
+        return v != null && v.exists()
+    }
+
+    private fun findInSrcFolders(project: Project, relPath: String): Boolean {
+        val base = project.basePath ?: return false
+        val norm = relPath.replace('\\', '/')
+        val candidates = listOf(
+            "src/test/resources/$norm",
+            "src/test/java/$norm",
+            "src/main/resources/$norm",
+            "src/main/java/$norm"
+        )
+        for (p in candidates) {
+            val v = LocalFileSystem.getInstance().findFileByPath(File(base, p).path)
+            if (v != null && v.exists()) return true
+        }
+        return false
     }
 }
