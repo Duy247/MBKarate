@@ -74,7 +74,6 @@
                 displayName="Karate Test Runner"
                 id="com.mb.mbplugin.settings.KarateTestRunnerSettingsConfigurable"
                 implementation="com.mb.mbplugin.settings.KarateTestRunnerSettingsConfigurable"/>
-        
         <!-- Jira Issue Intention Actions -->
         <intentionAction>
             <category>Jira Integration</category>

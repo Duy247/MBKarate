@@ -41,7 +41,7 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
     data class DocParseResult(
         val body: String,
         val params: List<ParamEntry>,
-        val returns: List<String>,
+        val returns: List<ReturnEntry>,
         val snippetBefore: String?,
         val snippetAfter: String?
     )
@@ -52,13 +52,20 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
         val description: String
     )
 
+    data class ReturnEntry(
+        val name: String,
+        val description: String
+    )
 
     fun parseDocDirectives(documentation: String): DocParseResult {
         val paramRegex = Regex(
-            """@param\s+((?:\{[^}]+})*)\s*(\w+)\s*\n([^\n]*)""",
+            """@param\s+((?:\{[^}]+})*)\s*(\w+)(?:\s*\n(?!\s*@param|\s*@return|\s*@snippet_before|\s*@snippet_after)([^\n]*))?""",
             RegexOption.MULTILINE
         )
-        val returnRegex = Regex("^\\s*@return\\s+(\\S+)", RegexOption.MULTILINE)
+        val returnRegex = Regex(
+            """@return\s+(\w+)(?:\s*\n(?!\s*@param|\s*@snippet_before|\s*@snippet_after|\s*@return)([^\n]*))?""",
+            RegexOption.MULTILINE
+        )
         val snippetBeforeRegex = Regex(
             "@snippet_before\\s+([\\s\\S]*?)(?=^\\s*@\\w+|\\Z)",
             setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
@@ -76,7 +83,11 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
             ParamEntry(name, tags, desc)
         }.toList()
 
-        val returns = returnRegex.findAll(documentation).map { it.groupValues[1] }.toList()
+        val returns = returnRegex.findAll(documentation).map {
+            val name = it.groupValues[1]
+            val desc = it.groups[2]?.value?.trim().orEmpty()
+            ReturnEntry(name, desc)
+        }.toList()
         val snippetBefore = snippetBeforeRegex.find(documentation)?.groupValues?.get(1)?.trim()
         val snippetAfter = snippetAfterRegex.find(documentation)?.groupValues?.get(1)?.trim()
 
@@ -269,24 +280,87 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
             append("</pre>")
 
             // Required predefined variables
+            // === Parameters Table ===
             if (parsed.params.isNotEmpty()) {
-                append("<br><b>Parameters:</b><ul>")
+                append("<br><b>Parameters:</b>")
+                append(
+                    """
+                    <table style="border-collapse: collapse; width: 500px; margin-top: 4px; white-space: nowrap;">
+                        <tr style="background-color: #2b2b2b; color: #ffffff;">
+                            <th style="text-align: left; padding: 4px; border: 1px solid #444;">Name</th>
+                            <th style="text-align: left; padding: 4px; border: 1px solid #444;">Tags</th>
+                            <th style="text-align: left; padding: 4px; border: 1px solid #444;">Description</th>
+                        </tr>
+                    """.trimIndent()
+                )
+
                 parsed.params.forEach { param ->
-                    val tagText = if (param.tags.isNotEmpty())
-                        param.tags.joinToString(", ", " [", "]") else ""
-                    append("<li><code>${escapeHtml(param.name)}</code>$tagText — ${escapeHtml(param.description)}</li>")
+                    val tagText = if (param.tags.isNotEmpty()) {
+                        param.tags.joinToString(" ") { rawTag ->
+                            rawTag.split("/").joinToString("/") { tag ->
+                                val lower = tag.lowercase()
+                                val color = when {
+                                    "required" in lower -> "#e53935"   // red
+                                    "optional" in lower -> "#1e88e5"   // blue
+                                    "input" in lower -> "#43a047"      // green
+                                    "predefined" in lower -> "#fb8c00" // orange
+                                    "default" in lower -> "#fbf700ff" // orange
+                                    else -> "#757575"                  // gray fallback
+                                }
+                                "<b><font color=\"$color\">${escapeHtml(tag)}</font></b>"
+                            }
+                        }
+                    } else ""
+
+                    val desc = if (param.description.isNotBlank())
+                        escapeHtml(param.description)
+                    else
+                        "&mdash;"
+
+                    append(
+                        """
+                        <tr>
+                            <td style="padding: 4px; border: 1px solid #444;"><code>${escapeHtml(param.name)}</code></td>
+                            <td style="padding: 4px; border: 1px solid #444; white-space: wrap;">$tagText</td>
+                            <td style="padding: 4px; border: 1px solid #444; white-space: wrap;">$desc</td>
+                        </tr>
+                        """.trimIndent()
+                    )
                 }
-                append("</ul>")
+                append("</table>")
             }
 
-            // Return values
+            // === Returns Table ===
             if (parsed.returns.isNotEmpty()) {
-                append("<br><b>Returns:</b>  — output variable from this scenario<ul>")
+                append("<br><b>Returns:</b>")
+                append(
+                    """
+                    <table style="border-collapse: collapse; width: 500px; margin-top: 4px; white-space: nowrap;">
+                        <tr style="background-color: #2b2b2b; color: #ffffff;">
+                            <th style="text-align: left; padding: 4px; border: 1px solid #444;">Name</th>
+                            <th style="text-align: left; padding: 4px; border: 1px solid #444;">Description</th>
+                        </tr>
+                    """.trimIndent()
+                )
+
                 parsed.returns.forEach { ret ->
-                    append("<li><code>${escapeHtml(ret)}</code></li>")
+                    val desc = if (ret.description.isNotBlank())
+                        escapeHtml(ret.description)
+                    else
+                        "&mdash;"
+
+                    append(
+                        """
+                        <tr>
+                            <td style="padding: 4px; border: 1px solid #444;"><code>${escapeHtml(ret.name)}</code></td>
+                            <td style="padding: 4px; border: 1px solid #444;">$desc</td>
+                        </tr>
+                        """.trimIndent()
+                    )
                 }
-                append("</ul>")
+                append("</table>")
             }
+
 
             if (!parsed.snippetBefore.isNullOrBlank()) {
                 val normalizedBefore = removeLeadingIndentation(parsed.snippetBefore!!)
