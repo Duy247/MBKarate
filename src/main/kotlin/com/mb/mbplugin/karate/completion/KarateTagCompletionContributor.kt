@@ -141,16 +141,22 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                 var snippetBefore: String? = null
                 var snippetAfter: String? = null
 
-
                 var paramInputs = emptyList<String>()
                 if (psiFile is com.mb.mbplugin.karate.psi.KarateFile) {
                     val docProvider = com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider()
                     val docText = docProvider.extractDocumentationFromFile(psiFile, tagData.tag)
                     if (!docText.isNullOrBlank()) {
                         val parsed = docProvider.parseDocDirectives(docText)
-                        paramInputs = parsed.paramInputs
                         snippetBefore = parsed.snippetBefore
                         snippetAfter = parsed.snippetAfter
+
+                        paramInputs = parsed.params
+                        .filter { param ->
+                            val tagsLower = param.tags.map { it.lowercase() }
+                            "input" in tagsLower && "required" in tagsLower
+                        }
+                        .map { it.name }
+
                     }
                 }
 

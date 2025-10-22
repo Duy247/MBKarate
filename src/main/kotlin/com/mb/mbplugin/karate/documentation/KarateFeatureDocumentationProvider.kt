@@ -38,18 +38,26 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
         )
     }
 
-    public data class DocParseResult(
+    data class DocParseResult(
         val body: String,
-        val params: List<String>,
-        val paramInputs: List<String>,
+        val params: List<ParamEntry>,
         val returns: List<String>,
         val snippetBefore: String?,
         val snippetAfter: String?
     )
 
-    public fun parseDocDirectives(documentation: String): DocParseResult {
-        val paramRegex = Regex("^\\s*@param\\s+(\\S+)", RegexOption.MULTILINE)
-        val paramInputRegex = Regex("^\\s*@param_input\\s+(\\S+)", RegexOption.MULTILINE)
+    data class ParamEntry(
+        val name: String,
+        val tags: List<String>,
+        val description: String
+    )
+
+
+    fun parseDocDirectives(documentation: String): DocParseResult {
+        val paramRegex = Regex(
+            """@param\s+((?:\{[^}]+})*)\s*(\w+)\s*\n([^\n]*)""",
+            RegexOption.MULTILINE
+        )
         val returnRegex = Regex("^\\s*@return\\s+(\\S+)", RegexOption.MULTILINE)
         val snippetBeforeRegex = Regex(
             "@snippet_before\\s+([\\s\\S]*?)(?=^\\s*@\\w+|\\Z)",
@@ -59,22 +67,27 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
             "@snippet_after\\s+([\\s\\S]*?)(?=^\\s*@\\w+|\\Z)",
             setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
         )
-        val params = paramRegex.findAll(documentation).map { it.groupValues[1] }.toList()
-        val paramInputs = paramInputRegex.findAll(documentation).map { it.groupValues[1] }.toList()
+
+        val params = paramRegex.findAll(documentation).map {
+            val rawTags = it.groupValues[1]
+            val tags = Regex("\\{([^}]+)}").findAll(rawTags).map { t -> t.groupValues[1] }.toList()
+            val name = it.groupValues[2]
+            val desc = it.groupValues[3].trim()
+            ParamEntry(name, tags, desc)
+        }.toList()
+
         val returns = returnRegex.findAll(documentation).map { it.groupValues[1] }.toList()
         val snippetBefore = snippetBeforeRegex.find(documentation)?.groupValues?.get(1)?.trim()
         val snippetAfter = snippetAfterRegex.find(documentation)?.groupValues?.get(1)?.trim()
 
-        // Remove directive lines from body
         var body = documentation
             .replace(paramRegex, "")
-            .replace(paramInputRegex, "")
             .replace(returnRegex, "")
             .replace(snippetBeforeRegex, "")
             .replace(snippetAfterRegex, "")
             .trim()
 
-        return DocParseResult(body, params, paramInputs, returns, snippetBefore, snippetAfter)
+        return DocParseResult(body, params, returns, snippetBefore, snippetAfter)
     }
 
     override fun generateDoc(element: PsiElement?, originalElement: PsiElement?): String? {
@@ -257,18 +270,11 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
 
             // Required predefined variables
             if (parsed.params.isNotEmpty()) {
-                append("<br><b>Predefined Variables: </b>— must be predefined or optionally passed<ul>")
+                append("<br><b>Parameters:</b><ul>")
                 parsed.params.forEach { param ->
-                    append("<li><code>${escapeHtml(param)}</code> </li>")
-                }
-                append("</ul>")
-            }
-
-            // Inputs passed via call read
-            if (parsed.paramInputs.isNotEmpty()) {
-                append("<br><b>Direct Inputs: </b> — must be passed with <code>call read()</code><ul>")
-                parsed.paramInputs.forEach { param ->
-                    append("<li><code>${escapeHtml(param)}</code></li>")
+                    val tagText = if (param.tags.isNotEmpty())
+                        param.tags.joinToString(", ", " [", "]") else ""
+                    append("<li><code>${escapeHtml(param.name)}</code>$tagText — ${escapeHtml(param.description)}</li>")
                 }
                 append("</ul>")
             }

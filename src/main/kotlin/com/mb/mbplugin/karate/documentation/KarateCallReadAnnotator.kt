@@ -3,34 +3,33 @@ package com.mb.mbplugin.karate.documentation
 import com.intellij.lang.annotation.AnnotationHolder
 import com.intellij.lang.annotation.Annotator
 import com.intellij.lang.annotation.HighlightSeverity
+import com.intellij.lang.LanguageAnnotators
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
-import com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider
-import java.util.regex.Pattern
-import com.intellij.lang.LanguageAnnotators
 import org.jetbrains.plugins.cucumber.psi.GherkinLanguage
+import java.util.regex.Pattern
 
 class KarateCallReadAnnotator : Annotator {
     init {
         LanguageAnnotators.INSTANCE.addExplicitExtension(GherkinLanguage.INSTANCE, this)
     }
+
     private val CALL_READ_PATTERN = Pattern.compile(
         "call\\s+read\\s*\\(\\s*['\"]classpath:([^'\"]+\\.feature)(@\\w+)?['\"]\\s*\\)(\\s*\\{([^}]*)\\})?",
         Pattern.CASE_INSENSITIVE
     )
 
     private val processedElements = mutableSetOf<Int>()
+
     override fun annotate(element: PsiElement, holder: AnnotationHolder) {
-        // Avoid duplicate processing
         val start = element.textOffset
         if (processedElements.contains(start)) return
         processedElements.add(start)
 
-        // Only process if this element is part of a "call read(" line
         val textFragment = element.text
         if (!textFragment.contains("call read(")) return
 
-        // --- 🧠 Combine sibling text fragments (handles <a>, <type>, etc.) ---
+        // Combine nearby fragments to reconstruct full line text
         val combinedText = buildString {
             var current: PsiElement? = element
             while (current != null && !current.text.contains("\n")) {
@@ -39,7 +38,6 @@ class KarateCallReadAnnotator : Annotator {
             }
         }
 
-        // --- Match the call read pattern ---
         val matcher = CALL_READ_PATTERN.matcher(combinedText)
         if (!matcher.find()) return
 
@@ -54,12 +52,20 @@ class KarateCallReadAnnotator : Annotator {
         val documentation = docProvider.findDocumentationForFeature(project, featurePath, scenarioTag) ?: return
         val parsed = docProvider.parseDocDirectives(documentation)
 
-        val allowedParams = parsed.paramInputs.toSet()
-        if (allowedParams.isEmpty()) return
+        // ✅ Collect only parameters that have both {input} and {required} tags
+        val requiredInputs = parsed.params
+            .filter { p ->
+                p.tags.any { it.equals("input", true) } &&
+                p.tags.any { it.equals("required", true) }
+            }
+            .map { it.name }
+            .toSet()
 
-        val providedParams = extractParamsFromBlock(paramsBlock)
+        if (requiredInputs.isEmpty()) return
 
-       val missing = allowedParams - providedParams
+        val providedParams = extractParamsFromBlock(paramsBlock).toSet()
+        val missing = requiredInputs - providedParams
+
         if (missing.isNotEmpty()) {
             val missingList = missing.joinToString(", ")
             holder.newAnnotation(
@@ -68,7 +74,6 @@ class KarateCallReadAnnotator : Annotator {
             ).range(element.textRange).create()
         }
     }
-
 
     private fun extractParamsFromBlock(paramsText: String): List<String> {
         // Parse simple Karate-style key:value pairs
