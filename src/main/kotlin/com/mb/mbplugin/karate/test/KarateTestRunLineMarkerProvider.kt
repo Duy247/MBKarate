@@ -153,7 +153,8 @@ class KarateTestRunLineMarkerProvider : LineMarkerProvider {
         
         // Get the configurable test runner file path from settings
         val settings = KarateTestRunnerSettings.getInstance(project)
-        val configuredPath = settings.testRunnerFilePath
+        val currentConfig = settings.getCurrentConfig()
+        val configuredPath = currentConfig.testRunnerFilePath
         
         // Now run the file writing in a background thread with all data collected
         ApplicationManager.getApplication().executeOnPooledThread {
@@ -169,8 +170,8 @@ class KarateTestRunLineMarkerProvider : LineMarkerProvider {
                     val className = testRunnerFile.nameWithoutExtension
                     
                     // TestRunner.java template content
-                    val template = if (settings.testRunnerTemplate.isNotEmpty()) {
-                        settings.testRunnerTemplate
+                    val template = if (currentConfig.testRunnerTemplate.isNotEmpty()) {
+                        currentConfig.testRunnerTemplate
                     } else {
                         // Default template if settings is empty
                         """

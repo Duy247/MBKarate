@@ -10,100 +10,124 @@ import java.awt.Dimension
 import javax.swing.*
 
 class KarateTestRunnerSettingsConfigurable(private val project: Project) : Configurable {
-    
-    private var testRunnerFilePathField: JBTextField? = null
-    private var testRunnerTemplateArea: JTextArea? = null
+    private var configCombo: JComboBox<String>? = null
+    private var filePathField: JBTextField? = null
+    private var templateArea: JTextArea? = null
     private var mainPanel: JPanel? = null
-    
-    override fun getDisplayName(): String = "Karate Test Runner"
-    
-    override fun createComponent(): JComponent? {
-        testRunnerFilePathField = JBTextField()
-        
-        // Create template text area with syntax highlighting-like appearance
-        testRunnerTemplateArea = JTextArea(25, 80).apply {
+
+    override fun getDisplayName() = "Karate Test Runner"
+
+    override fun createComponent(): JComponent {
+        val settings = KarateTestRunnerSettings.getInstance(project)
+
+        configCombo = JComboBox<String>().apply {
+            settings.state.configs.forEach { addItem(it.name) }
+            selectedItem = settings.state.currentConfig
+            addActionListener {
+                val name = selectedItem as String
+                settings.setCurrentConfigName(name)
+                val cfg = settings.getCurrentConfig()
+                filePathField?.text = cfg.testRunnerFilePath
+                templateArea?.text = cfg.testRunnerTemplate
+            }
+        }
+
+        val addBtn = JButton("Add").apply {
+            toolTipText = "Add new configuration"
+            addActionListener {
+                val name = JOptionPane.showInputDialog("Enter configuration name:")
+                if (!name.isNullOrBlank()) {
+                    settings.addConfig(name)
+                    configCombo?.addItem(name)
+                    configCombo?.selectedItem = name
+                }
+            }
+        }
+
+        val removeBtn = JButton("Remove").apply {
+            toolTipText = "Remove selected configuration"
+            addActionListener {
+                val name = configCombo?.selectedItem as? String ?: return@addActionListener
+                if (name != "Default") {
+                    settings.removeConfig(name)
+                    configCombo?.removeItem(name)
+                    configCombo?.selectedItem = settings.state.currentConfig
+                } else {
+                    JOptionPane.showMessageDialog(null, "Default config cannot be removed.")
+                }
+            }
+        }
+
+        filePathField = JBTextField()
+        templateArea = JTextArea(25, 40).apply {
             font = java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.PLAIN, 12)
             tabSize = 4
-            lineWrap = false
-            wrapStyleWord = false
         }
-        
-        val scrollPane = JBScrollPane(testRunnerTemplateArea).apply {
-            preferredSize = Dimension(600, 400)
-            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
-            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+
+        val scrollPane = JBScrollPane(templateArea).apply {
+            preferredSize = Dimension(300, 200)
         }
-        
-        // Create help text for template variables
-        val helpText = JBLabel("<html><b>Available template variables:</b><br>" +
-            "{{PACKAGE_NAME}} - Java package name derived from file path<br>" +
-            "{{CLASS_NAME}} - Java class name derived from file name<br>" +
-            "{{FILE_PATH}} - Relative path to the feature file<br>" +
-            "{{TAG_TEXT}} - The selected tag text<br><br>" +
-            "<i>Tip: Use standard Java syntax with these placeholders</i></html>")
-        
+
+        val toolbar = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            add(JBLabel("Configuration: "))
+            add(configCombo)
+            add(Box.createHorizontalStrut(5))
+            add(addBtn)
+            add(removeBtn)
+        }
+
+        val helpText = JBLabel(
+            """
+                <html>
+                <b>Available template variables:</b><br>
+                {{PACKAGE_NAME}} – Java package name derived from file path<br>
+                {{CLASS_NAME}} – Java class name derived from file name<br>
+                {{FILE_PATH}} – Relative path to the feature file<br>
+                {{TAG_TEXT}} – The selected tag text<br><br>
+                <i>Tip: Use standard Java syntax with these placeholders.</i>
+                </html>
+            """.trimIndent()
+        )
+
         mainPanel = FormBuilder.createFormBuilder()
-            .addLabeledComponent(
-                JBLabel("TestRunner.java file path:"), 
-                testRunnerFilePathField!!, 
-                1, 
-                false
-            )
-            .addVerticalGap(10)
-            .addLabeledComponent(
-                JBLabel("TestRunner.java template:"),
-                scrollPane,
-                1,
-                true
-            )
-            .addVerticalGap(5)
+            .addComponent(toolbar)
+            .addLabeledComponent(JBLabel("Test Runner File Path:"), filePathField!!)
+            .addLabeledComponent(JBLabel("Test Runner Template:"), scrollPane)
             .addComponent(helpText)
             .addComponentFillVertically(JPanel(), 0)
             .panel
-        
-        return mainPanel
+
+        reset()
+        return mainPanel!!
     }
-    
+
     override fun isModified(): Boolean {
         val settings = KarateTestRunnerSettings.getInstance(project)
-        return testRunnerFilePathField?.text != settings.testRunnerFilePath ||
-               testRunnerTemplateArea?.text != settings.testRunnerTemplate
+        val cfg = settings.getCurrentConfig()
+        return filePathField?.text != cfg.testRunnerFilePath ||
+               templateArea?.text != cfg.testRunnerTemplate
     }
-    
+
     override fun apply() {
         val settings = KarateTestRunnerSettings.getInstance(project)
-        settings.testRunnerFilePath = testRunnerFilePathField?.text ?: ""
-        settings.testRunnerTemplate = testRunnerTemplateArea?.text ?: ""
+        val cfg = settings.getCurrentConfig()
+        cfg.testRunnerFilePath = filePathField?.text ?: ""
+        cfg.testRunnerTemplate = templateArea?.text ?: ""
     }
-    
+
     override fun reset() {
         val settings = KarateTestRunnerSettings.getInstance(project)
-        testRunnerFilePathField?.text = settings.testRunnerFilePath
-        testRunnerTemplateArea?.text = settings.testRunnerTemplate.ifEmpty { 
-            // Default template if empty
-            """
-package {{PACKAGE_NAME}};
-
-import com.intuit.karate.junit5.Karate;
-import org.junit.jupiter.api.BeforeAll;
-import com.karate.mock.MockServerRunner;
-
-class {{CLASS_NAME}} {
-    @Karate.Test
-    Karate testMockApi() {
-        return Karate.run("classpath:{{FILE_PATH}}")
-                .tags("{{TAG_TEXT}}")
-                .karateEnv("local")
-                .relativeTo(getClass());
+        val cfg = settings.getCurrentConfig()
+        filePathField?.text = cfg.testRunnerFilePath
+        templateArea?.text = cfg.testRunnerTemplate
+        configCombo?.selectedItem = settings.state.currentConfig
     }
-}
-""".trimIndent()
-        }
-    }
-    
+
     override fun disposeUIResources() {
-        testRunnerFilePathField = null
-        testRunnerTemplateArea = null
         mainPanel = null
+        configCombo = null
+        filePathField = null
+        templateArea = null
     }
 }

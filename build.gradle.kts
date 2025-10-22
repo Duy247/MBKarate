@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.3.1"
+version = "1.3.2"
 
 repositories {
     mavenLocal()    
@@ -43,9 +43,10 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.3.1</h3>
+            <h3>Version 1.3.2</h3>
             <ul>
-              <li>Minor change: add snippet in docstring</li>
+              <li>Major change: change docview of params and return to table, add tag</li>
+              <li>Major change: support multiple test runner configurations</li>
             </ul>
         """.trimIndent()
     }
