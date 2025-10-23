@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.3.2"
+version = "1.3.3"
 
 repositories {
     mavenLocal()    
@@ -43,10 +43,9 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.3.2</h3>
+            <h3>Version 1.3.3</h3>
             <ul>
-              <li>Major change: change docview of params and return to table, add tag</li>
-              <li>Major change: support multiple test runner configurations</li>
+              <li>Bug fix: Solve duplicate error report on incorrect file path</li>
             </ul>
         """.trimIndent()
     }

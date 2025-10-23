@@ -1,0 +1,91 @@
+<h3>Compatibility</h3>
+<p> 
+    This plugin is compatible with <strong>IntelliJ IDEA 2025.1 and above</strong>.<br> 
+    If you are using older versions
+    (<strong>2023.2 up to 2025.1</strong>), please consider updating IntelliJ or contact <em>hotrocntt</em> (MB Bank IT
+    Support) to request an upgrade. 
+</p>
+<h3>About</h3>
+<p> This plugin is built <strong>specifically for the MB Bank App’s Automation Team</strong>, focusing on improving the
+    workflow for <strong>Karate Framework</strong> API and functional testing projects such as <em>Auto App KHCN</em>.
+</p>
+<h3>Installation</h3>
+<ol>
+    <li>Download the <code>mb-plugin.zip</code> package or install directly from the internal plugin marketplace.</li>
+    <li>Ensure you have the official <strong>Gherkin</strong> plugin installed (required for .feature file support).</li>
+    <li>Restart IntelliJ IDEA to activate the plugin.</li>
+</ol>
+<h3>Usage</h3>
+<ol>
+    <li> <strong>Syntax Highlighting &amp; Formatting:</strong><br> Standard <em>Gherkin</em> syntax highlighting, code
+        folding, and formatting are supported. No custom syntax extensions are added — the plugin builds upon native
+        Gherkin/Cucumber behavior. 
+    </li>
+    <li> <strong>Jira Issue Integration:</strong><br> Any tag following the pattern <code>@MBA-XXXXX</code> is
+        automatically detected. A small Jira icon appears in the gutter; clicking it opens the corresponding issue in
+        your default browser.<br> Configure Jira under <em>Settings → Tools → Jira Integration</em> by specifying your
+        Jira base URL and ticket pattern. 
+    </li>
+    <li> <strong>Navigation &amp; References:</strong><br> - Ctrl/Cmd + Click supports native <em>Go to Step
+            Definition</em> for Gherkin steps.<br> 
+            - <code>call read('classpath:...')</code> navigation is enhanced — you can jump directly to the target scenario in another feature file.<br> - Missing or invalid feature paths are underlined and annotated for quick fixes. 
+    </li>
+    <li> <strong>DocView (Documentation Hover):</strong><br> Hover over a <code>call read</code> statement to see its
+        documentation if the target scenario includes a docstring such as:<br>
+        <pre><code> 
+            @tag 
+            Scenario: Example 
+            """ 
+            @tag_DOC 
+            This is the documentation for the scenario. 
+            @param {required}{input} userId 
+            User ID used for login 
+            @return token Generated authentication token 
+            """
+        </code></pre>
+        The plugin automatically parses <br>
+        <code>@param</code> (will trigger param check on <code>call read()</code> if tag {required} and {input} are involved, also autocomplete), <br>
+        <code>@return</code>, <br>
+        <code>@snippet_before</code> (will trigger autocomplete, the code snippet will be added <b>before</b> the <code>call read()</code>),<br>
+        <code>@snippet_after</code> (same but <b>after</b> <code>call read()</code>) tags <br>
+        and displays them in a structured view with syntax highlighting.
+    </li>
+    <li> <strong>Autocomplete:</strong><br> 
+        - Native Cucumber step autocompletion. <br> 
+        - <code>#</code> triggers file path and scenario completion (e.g., typing <code>#auth</code> suggests <code>auth.feature</code>).<br> 
+        - <code>!</code> triggers tag-based completion (e.g., typing <code>!login</code> suggests all <code>@login</code> scenarios).<br> 
+        - Parameter hints from <code>@param</code> directives in docstrings are also included in completions.
+    </li>
+    <li> <strong>Enhanced Docstring Parsing:</strong><br> The plugin supports structured documentation blocks inside
+        triple quotes (<code>"""</code>):<br>
+        <ul>
+            <li><code>@param {tags} name</code> — defines parameters with multiple tags (e.g.,
+                <code>{required}{input}</code>).</li>
+            <li><code>@return name</code> — defines output variables.</li>
+            <li><code>@snippet_before / @snippet_after</code> — defines Karate code snippets shown in DocView.</li>
+        </ul> <br>
+        The tag will affect how the parameter is treated ({required}{input} triggers error checking, shows in autocomplete).
+    </li>
+    <li> <strong>Error Checking:</strong><br> 
+        - Detects missing required <code>@param</code> inputs in <code>call read(...)</code> blocks.<br> 
+        - Warns when a referenced feature or tag cannot be resolved.<br> </li>
+    <li> <strong>Custom Test Execution:</strong><br> 
+        A custom gutter icon appears next to scenario tags. Clicking it allows you to <strong>Run</strong> or
+        <strong>Debug</strong> a test through an auto-generated <code>TestRunner.java</code> file.<br> 
+        You can configure multiple runner templates under <em>Settings → Tools → Karate Test Runner</em>: 
+        <ul>
+            <li>Define multiple runner configurations (e.g., local, SIT, UAT).</li>
+            <li>Each runner template supports variable placeholders: 
+                <ul>
+                    <li><code>{{PACKAGE_NAME}}</code></li>
+                    <li><code>{{CLASS_NAME}}</code></li>
+                    <li><code>{{FILE_PATH}}</code></li>
+                    <li><code>{{TAG_TEXT}}</code></li>
+                </ul>
+            </li>
+        </ul>
+    </li>
+    <li> <strong>Docstring Color Settings:</strong><br> 
+        Customize tag colors (e.g., <code>{required}</code>, <code>{input}</code>, <code>{optional}</code>, <code>{predefined}</code>)
+    </li>
+</ol>

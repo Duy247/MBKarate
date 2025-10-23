@@ -13,6 +13,8 @@ import com.intellij.psi.PsiElement
 import org.jetbrains.plugins.cucumber.psi.GherkinLanguage
 import java.io.File
 import java.util.regex.Pattern
+import com.intellij.psi.PsiDocumentManager
+
 
 class KarateMissingFeatureAnnotator : Annotator {
 
@@ -67,9 +69,36 @@ class KarateMissingFeatureAnnotator : Annotator {
             if (!existsAtProjectPath(element.project, raw)) anyProblem = true
         }
 
-        if (anyProblem) {
-            holder.newAnnotation(HighlightSeverity.WARNING, "File not found in project").range(element.textRange).create()
-        }
+if (anyProblem) {
+    val text = element.text
+    val baseOffset = element.textOffset
+
+    // Try matching all paths again within this element text
+    val matcher = CLASSPATH_PATTERN.matcher(text)
+    while (matcher.find()) {
+        val pathStart = baseOffset + matcher.start(1)
+        val pathEnd = baseOffset + matcher.end(1)
+        val range = com.intellij.openapi.util.TextRange(pathStart, pathEnd)
+
+        holder.newAnnotation(
+            HighlightSeverity.WARNING,
+            "File not found in project"
+        ).range(range).create()
+    }
+
+    val srcMatcher = SRC_LITERAL_PATTERN.matcher(text)
+    while (srcMatcher.find()) {
+        val pathStart = baseOffset + srcMatcher.start(1)
+        val pathEnd = baseOffset + srcMatcher.end(1)
+        val range = com.intellij.openapi.util.TextRange(pathStart, pathEnd)
+
+        holder.newAnnotation(
+            HighlightSeverity.WARNING,
+            "File not found in project"
+        ).range(range).create()
+    }
+}
+
     }
 
     private fun findInClasspathRoots(module: com.intellij.openapi.module.Module, relPath: String): Boolean {
