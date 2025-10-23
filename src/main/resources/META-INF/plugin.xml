@@ -89,6 +89,11 @@
     
     <!-- Actions (Removed Karate Tables formatter as we're using Gherkin plugin for formatting) -->
     <actions>
-        <!-- Custom actions can be added here if needed in the future -->
+        <action id="com.mb.mbplugin.karate.actions.ImportCurlAction"
+            class="com.mb.mbplugin.karate.actions.ImportCurlAction"
+            text="Import cURL as Karate Feature"
+            description="Convert a curl command into a Karate test">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

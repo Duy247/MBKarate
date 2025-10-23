@@ -34,6 +34,7 @@ dependencies {
         // The required plugins are defined in plugin.xml
     }
     // implementation("com.duy.karate.test:karate-feature-demo:1.0-SNAPSHOT")
+    implementation("org.json:json:20240303")
 }
 
 intellijPlatform {
@@ -45,6 +46,7 @@ intellijPlatform {
         changeNotes = """
             <h3>Version 1.3.3</h3>
             <ul>
+              <li>Major change: Add "Import cURL as Karate Feature" action to convert cURL commands into Karate tests</li>
               <li>Bug fix: Solve duplicate error report on incorrect file path</li>
             </ul>
         """.trimIndent()
