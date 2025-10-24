@@ -45,6 +45,7 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         val textBeforeCursor = file.text.substring(0, offset)
         val lastExclamationIndex = textBeforeCursor.lastIndexOf('!')
         val lastHashIndex = textBeforeCursor.lastIndexOf('#')
+        val lastAmpIndex = textBeforeCursor.lastIndexOf('&')
         
         // Check if we're in a context where completion should be triggered
         // 1. After ! symbol for tag-based completion (only in specific contexts)
@@ -53,6 +54,7 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         var partialTag = ""
         var isTagCompletion = false
         var isFileCompletion = false
+        var isShortCompletion = false
         
         // Check which trigger is more recent and within a stricter range
         val maxTriggerDistance = 20 // Reduced from 50 to be more restrictive for tags
@@ -76,13 +78,18 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                     .takeWhile { it.isLetterOrDigit() || it == '_' || Character.isLetter(it) || it == '.' }
                 isFileCompletion = true
             }
+        } else if (lastAmpIndex != -1 && offset - lastAmpIndex <= 50 &&
+                (lastExclamationIndex == -1 || lastAmpIndex > lastExclamationIndex) &&
+                (lastHashIndex == -1 || lastAmpIndex > lastHashIndex)) {
+            isShortCompletion = true
         }
+
         
         // If neither completion type is triggered, return early
-        if (!isTagCompletion && !isFileCompletion) {
+        if (!isTagCompletion && !isFileCompletion && !isShortCompletion) {
             return
         }
-        
+
         // Additional safety check: ensure we're not in the middle of a regular word
         // by checking if there's a word character immediately before our trigger symbol
         if (isTagCompletion && lastExclamationIndex > 0) {
@@ -101,6 +108,105 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                 return
             }
         }
+        if (isShortCompletion) {
+            result.restartCompletionOnAnyPrefixChange()
+            result.stopHere()
+
+            val project = parameters.originalFile.project
+            val prefix = textBeforeCursor.substring(lastAmpIndex + 1)
+
+            val docProvider = com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider()
+            val allFeatures = com.mb.mbplugin.karate.index.KarateFeatureIndex.getAllFeatureFiles(project)
+
+            allFeatures.forEach { vf ->
+                val psiFile = com.intellij.psi.PsiManager.getInstance(project).findFile(vf)
+                if (psiFile !is com.mb.mbplugin.karate.psi.KarateFile) return@forEach
+
+                val text = psiFile.text
+                val matcher = Regex("\"\"\"\\s*@([A-Za-z0-9_]+_DOC)\\s*\\n([\\s\\S]*?)\"\"\"", RegexOption.MULTILINE)
+                matcher.findAll(text).forEach { m ->
+                    val scenarioTag = m.groupValues[1].removeSuffix("_DOC")
+                    val docText = m.groupValues[2]
+                    val parsed = docProvider.parseDocDirectives(docText)
+                    val short = parsed.shortDescription ?: return@forEach
+
+                    // Fixed prefix filtering — fuzzy match both directions
+                    if (prefix.isNotBlank() &&
+                        prefix.contains(short, ignoreCase = true)
+                    ) return@forEach
+
+                    val relPath = getRelativePathFromSourceRoot(project, vf)
+                    val normPath = normalizeClasspathPath(relPath)
+                    val featureName = vf.nameWithoutExtension
+
+                    // === Collect param inputs ===
+                    val paramInputs = parsed.params.filter { p ->
+                        val tags = p.tags.map { it.lowercase() }
+                        "input" in tags && "required" in tags
+                    }.map { it.name }
+
+                    val paramBlock = if (paramInputs.isNotEmpty()) {
+                        paramInputs.joinToString(", ", prefix = " { ", postfix = " }") { "$it: ''" }
+                    } else ""
+
+                    // === NEW: Include snippet_before and snippet_after ===
+                    val beforeSnippet = parsed.snippetBefore?.trim()?.let { removeLeadingIndentation(it) }
+                    val afterSnippet = parsed.snippetAfter?.trim()?.let { removeLeadingIndentation(it) }
+
+                    val callLine = "* call read('classpath:${normPath}@${scenarioTag}')$paramBlock"
+
+                    // Build the full suggestion text
+                    val fullSuggestion = buildString {
+                        if (!beforeSnippet.isNullOrBlank()) {
+                            append(beforeSnippet)
+                            if (!beforeSnippet.endsWith("\n")) append("\n")
+                        }
+                        append(callLine)
+                        if (!afterSnippet.isNullOrBlank()) {
+                            append("\n")
+                            append(afterSnippet)
+                        }
+                    }
+
+                    val lookup = LookupElementBuilder.create("&${short}")
+                        .withPresentableText(short)
+                        .withTypeText("${featureName}.feature@$scenarioTag", true)
+                        .withTailText(" (${normPath})", true)
+                        .withInsertHandler { ctx, _ ->
+                            val doc = ctx.document
+                            val start = ctx.startOffset
+                            val end = ctx.tailOffset
+
+                            val lineNum = doc.getLineNumber(start)
+                            val lineStart = doc.getLineStartOffset(lineNum)
+                            val lineText = doc.getText(com.intellij.openapi.util.TextRange(lineStart, start))
+                            val ampIndex = lineText.lastIndexOf('&')
+
+                            // everything before & is just spaces → delete from there
+                            val replaceStart = if (ampIndex >= 0) lineStart + ampIndex else start
+                            val baseIndent = lineText.takeWhile { it == ' ' || it == '\t' }
+
+                            // clean out current line from the & onward
+                            doc.deleteString(replaceStart, end)
+
+                            // rebuild final text: first line has no extra indent, following do
+                            val lines = fullSuggestion.lines()
+                            val built = buildString {
+                                lines.forEachIndexed { i, raw ->
+                                    val t = raw.trimStart()
+                                    if (i > 0) append("\n").append(baseIndent)
+                                    append(t)
+                                }
+                            }
+                            doc.insertString(replaceStart, built)
+                        }
+                    result.addElement(lookup)
+                }
+            }
+
+            return
+        }
+
         
         // Get all matching tags and feature files
         val matchingItems = getAllMatchingItems(project, partialTag, isTagCompletion, isFileCompletion)
@@ -166,7 +272,6 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                     ""
                 }
 
-
                 val callReadLine = "* call read('classpath:${normalizedPath}@${tagData.tag}')$paramBlock"
 
                 val fullSuggestion = buildString {
@@ -211,6 +316,14 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
             }
         }
     }
+
+    private fun getIndentBeforeCaret(document: com.intellij.openapi.editor.Document, offset: Int): String {
+        val lineNum = document.getLineNumber(offset)
+        val lineStart = document.getLineStartOffset(lineNum)
+        val prefix = document.getText(com.intellij.openapi.util.TextRange(lineStart, offset))
+        return prefix.takeWhile { it.isWhitespace() }
+    }
+
     
     private fun getAllMatchingItems(
         project: com.intellij.openapi.project.Project,
@@ -343,10 +456,8 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         }
     }
 
-
-
     private fun handleFeatureFileInsertion(
-        insertContext: com.intellij.codeInsight.completion.InsertionContext, 
+        insertContext: InsertionContext,
         suggestion: String,
         isTagCompletion: Boolean,
         isFileCompletion: Boolean
@@ -354,46 +465,57 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         val document = insertContext.document
         val startOffset = insertContext.startOffset
         val tailOffset = insertContext.tailOffset
-        
-        // Remove what was just inserted by the completion system
+
         document.deleteString(startOffset, tailOffset)
-        
+
         if (isTagCompletion) {
-            // Handle insertion like tag completion (after !)
             handleTagInsertion(insertContext, suggestion)
-        } else if (isFileCompletion) {
-            // Handle insertion for feature file name completion (after #) - copy @ logic
+            return
+        }
+
+        if (isFileCompletion) {
             val currentText = document.text
             var replaceStart = startOffset - 1
-            
-            // Go backwards to find the # symbol
+
+            // find '#'
             while (replaceStart >= 0 && currentText[replaceStart] != '#') {
-                val char = currentText[replaceStart]
-                if (!char.isLetterOrDigit() && char != '_' && !Character.isLetter(char)) {
-                    break
-                }
+                val c = currentText[replaceStart]
+                if (!c.isLetterOrDigit() && c != '_' && !Character.isLetter(c)) break
                 replaceStart--
             }
-            
-            // If we found #, replace from there
-            if (replaceStart >= 0 && currentText[replaceStart] == '#') {
-                var replaceEnd = replaceStart + 1
-                // Find end of tag
-                while (replaceEnd < currentText.length && 
-                       (currentText[replaceEnd].isLetterOrDigit() || 
-                        currentText[replaceEnd] == '_' || 
-                        Character.isLetter(currentText[replaceEnd]))) {
-                    replaceEnd++
-                }
-                
-                // Replace #word with our suggestion
-                document.replaceString(replaceStart, replaceEnd, suggestion)
-            } else {
-                // Fallback: just insert at current position
+
+            if (replaceStart < 0 || currentText[replaceStart] != '#') {
                 document.insertString(startOffset, suggestion)
+                return
             }
+
+            val lineNum = document.getLineNumber(replaceStart)
+            val lineStart = document.getLineStartOffset(lineNum)
+            val lineText = document.getText(com.intellij.openapi.util.TextRange(lineStart, replaceStart))
+            val baseIndent = lineText.takeWhile { it == ' ' || it == '\t' }
+
+            var replaceEnd = replaceStart + 1
+            while (replaceEnd < currentText.length &&
+                (currentText[replaceEnd].isLetterOrDigit() || currentText[replaceEnd] == '_' || Character.isLetter(currentText[replaceEnd]))) {
+                replaceEnd++
+            }
+
+            document.deleteString(replaceStart, replaceEnd)
+
+            // build with correct indent
+            val lines = suggestion.lines()
+            val built = buildString {
+                lines.forEachIndexed { i, raw ->
+                    val t = raw.trimStart()
+                    if (i > 0) append("\n").append(baseIndent)
+                    append(t)
+                }
+            }
+
+            document.insertString(replaceStart, built)
         }
     }
+
 
     private fun getAllTagsStartingWith(
         project: com.intellij.openapi.project.Project, 
