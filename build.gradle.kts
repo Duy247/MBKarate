@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.3.3"
+version = "1.4.0"
 
 repositories {
     mavenLocal()    
@@ -44,10 +44,10 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.3.3</h3>
+            <h3>Version 1.4.0</h3>
             <ul>
-              <li>Major change: Add "Import cURL as Karate Feature" action to convert cURL commands into Karate tests</li>
-              <li>Bug fix: Solve duplicate error report on incorrect file path</li>
+              <li>Major change: Add short hand description and autocomplete </li>
+              <li>Improve code performance</li>
             </ul>
         """.trimIndent()
     }
