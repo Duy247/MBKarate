@@ -43,9 +43,9 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
         val params: List<ParamEntry>,
         val returns: List<ReturnEntry>,
         val snippetBefore: String?,
-        val snippetAfter: String?
+        val snippetAfter: String?,
+        val shortDescription: String?
     )
-
     data class ParamEntry(
         val name: String,
         val tags: List<String>,
@@ -74,6 +74,11 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
             "@snippet_after\\s+([\\s\\S]*?)(?=^\\s*@\\w+|\\Z)",
             setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
         )
+        val shortRegex = Regex(
+            "^\\s*@short\\s+([^\\r\\n]+)\\s*(?:\\r?\\n|\\Z)",
+            setOf(RegexOption.MULTILINE, RegexOption.IGNORE_CASE)
+        )
+
 
         val params = paramRegex.findAll(documentation).map {
             val rawTags = it.groupValues[1]
@@ -90,15 +95,17 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
         }.toList()
         val snippetBefore = snippetBeforeRegex.find(documentation)?.groupValues?.get(1)?.trim()
         val snippetAfter = snippetAfterRegex.find(documentation)?.groupValues?.get(1)?.trim()
+        val shortDesc = shortRegex.find(documentation)?.groupValues?.get(1)?.trim()
 
         var body = documentation
             .replace(paramRegex, "")
             .replace(returnRegex, "")
             .replace(snippetBeforeRegex, "")
             .replace(snippetAfterRegex, "")
+            .replace(shortRegex, "")
             .trim()
 
-        return DocParseResult(body, params, returns, snippetBefore, snippetAfter)
+        return DocParseResult(body, params, returns, snippetBefore, snippetAfter, shortDesc)
     }
 
     override fun generateDoc(element: PsiElement?, originalElement: PsiElement?): String? {
@@ -274,10 +281,16 @@ class KarateFeatureDocumentationProvider : AbstractDocumentationProvider() {
         val processedBody = removeLeadingIndentation(parsed.body)
 
         return buildString {
+            if (!parsed.shortDescription.isNullOrBlank()) {
+                append("<pre style=\"font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; background-color: rgba(79, 195, 247, 0.08); font-style: italic; font-size: 1em; color: #b3e5fc;\">")
+                append(escapeHtml(parsed.shortDescription!!).trimIndent())
+                append("</pre><br>")
+            }
+
             append("<html><body style=\"font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;\">")
             append("<pre style=\"font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; margin: 0; padding: 0;\">")
             append(escapeHtml(processedBody))
-            append("</pre>")
+            append("</pre><br>")
 
             // Required predefined variables
             // === Parameters Table ===

@@ -28,7 +28,8 @@
     </li>
     <li> <strong>Navigation &amp; References:</strong><br> - Ctrl/Cmd + Click supports native <em>Go to Step
             Definition</em> for Gherkin steps.<br> 
-            - <code>call read('classpath:...')</code> navigation is enhanced — you can jump directly to the target scenario in another feature file.<br> - Missing or invalid feature paths are underlined and annotated for quick fixes. 
+            - <code>call read('classpath:...')</code> navigation is enhanced — you can jump directly to the target scenario in another feature file. Also applies for target json file<br> 
+            - Missing or invalid feature paths are underlined and annotated for quick fixes. 
     </li>
     <li> <strong>DocView (Documentation Hover):</strong><br> Hover over a <code>call read</code> statement to see its
         documentation if the target scenario includes a docstring such as:<br>
@@ -54,7 +55,8 @@
         - Native Cucumber step autocompletion. <br> 
         - <code>#</code> triggers file path and scenario completion (e.g., typing <code>#auth</code> suggests <code>auth.feature</code>).<br> 
         - <code>!</code> triggers tag-based completion (e.g., typing <code>!login</code> suggests all <code>@login</code> scenarios).<br> 
-        - Parameter hints from <code>@param</code> directives in docstrings are also included in completions.
+        - Parameter hints from <code>@param</code> directives in docstrings are also included in completions. <br>
+        - snippet_before/after tags will also be suggested upon autocompletion.
     </li>
     <li> <strong>Enhanced Docstring Parsing:</strong><br> The plugin supports structured documentation blocks inside
         triple quotes (<code>"""</code>):<br>
@@ -84,6 +86,11 @@
                 </ul>
             </li>
         </ul>
+    </li>
+    <li>
+        <strong>Import cUrl:</strong><br> 
+        Right-clicking inside a feature file now shows an "Import cUrl" option. Selecting this opens a dialog where you can paste a
+        cUrl command. The plugin will parse the command and generate the corresponding Karate syntax, inserting it and <b>replace</b> the file content
     </li>
     <li> <strong>Docstring Color Settings:</strong><br> 
         Customize tag colors (e.g., <code>{required}</code>, <code>{input}</code>, <code>{optional}</code>, <code>{predefined}</code>)
