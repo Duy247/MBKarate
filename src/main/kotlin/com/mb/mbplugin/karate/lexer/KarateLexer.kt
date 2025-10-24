@@ -1,8 +1,8 @@
 package com.mb.mbplugin.karate.lexer
 
 import com.intellij.lexer.LexerBase
-import com.intellij.psi.tree.IElementType
 import com.intellij.psi.TokenType
+import com.intellij.psi.tree.IElementType
 import com.mb.mbplugin.karate.psi.KarateTokenTypes
 
 class KarateLexer : LexerBase() {
@@ -15,23 +15,35 @@ class KarateLexer : LexerBase() {
     private var tokenEnd = 0
     private var isInTableRow = false
     private var isFirstTableRow = false
+    private val tableHeaderNames = mutableListOf<String>()
 
-    // Enhanced keyword sets for better recognition
-    private val KARATE_DSL_KEYWORDS = setOf(
-        "def", "text", "eval", "match", "assert", "call", "read", "set", "remove", "replace",
-        "configure", "callonce", "print", "get", "copy", "table", "yaml", "csv", "string",
-        "json", "xml", "xmlstring", "bytes", "listen", "doc", "param", "header", "cookie",
-        "form", "multipart", "params", "headers", "cookies", "retry", "soap",
-        "contains", "only", "deep", "schema", "type", "each", "js", "graphql", "if", "else", "compare",
-        "delay", "repeat", "karateEnv", "karateTags", "driver", "robot", "report"
-    )
-    
-    private val HTTP_KEYWORDS = setOf(
-        "url", "path", "method", "status", "request", "response", "responseBytes", 
-        "responseStatus", "responseHeaders", "responseCookies", "responseTime", 
-        "responseType", "requestTimeStamp", "get", "post", "put", "delete", "patch", "head", "options",
-        "connect", "trace", "http", "https", "ws", "wss", "graphql", "soap", "multipart", "form"
-    )
+    companion object {
+        private val KARATE_DSL_KEYWORDS = setOf(
+            "def", "text", "eval", "match", "assert", "call", "read", "set", "remove", "replace",
+            "configure", "callonce", "print", "get", "copy", "table", "yaml", "csv", "string",
+            "json", "xml", "xmlstring", "bytes", "listen", "doc", "param", "header", "cookie",
+            "form", "multipart", "params", "headers", "cookies", "retry", "soap",
+            "contains", "only", "deep", "schema", "type", "each", "js", "graphql", "if", "else", "compare",
+            "delay", "repeat", "karateEnv", "karateTags", "driver", "robot", "report"
+        )
+        
+        private val HTTP_KEYWORDS = setOf(
+            "url", "path", "method", "status", "request", "response", "responseBytes", 
+            "responseStatus", "responseHeaders", "responseCookies", "responseTime", 
+            "responseType", "requestTimeStamp", "get", "post", "put", "delete", "patch", "head", "options",
+            "connect", "trace", "http", "https", "ws", "wss", "graphql", "soap", "multipart", "form"
+        )
+        
+        private val GHERKIN_KEYWORDS = setOf(
+            "feature", "background", "scenario", "examples", "rule", "example"
+        )
+        
+        private val STEP_KEYWORDS = setOf("given", "when", "then", "and", "but")
+        
+        private val ACTION_KEYWORDS = setOf(
+            "match", "assert", "print", "call", "read", "set", "remove", "replace", "eval"
+        )
+    }
 
     override fun start(buffer: CharSequence, startOffset: Int, endOffset: Int, initialState: Int) {
         this.buffer = buffer
@@ -42,12 +54,11 @@ class KarateLexer : LexerBase() {
     }
 
     override fun getState(): Int = 0
-
     override fun getTokenType(): IElementType? = tokenType
-
     override fun getTokenStart(): Int = tokenStart
-
     override fun getTokenEnd(): Int = tokenEnd
+    override fun getBufferSequence(): CharSequence = buffer ?: ""
+    override fun getBufferEnd(): Int = endOffset
 
     override fun advance() {
         if (position >= endOffset) {
@@ -56,40 +67,30 @@ class KarateLexer : LexerBase() {
         }
 
         tokenStart = position
-        val startPosition = position // Save starting position to check for progress
+        val startPosition = position
         
         when {
-            isAtEnd() -> {
-                tokenType = null
-                return
-            }
-            isWhitespace(currentChar()) -> skipWhitespace()
+            isAtEnd() -> tokenType = null
+            currentChar().isWhitespace() -> readWhitespace()
             currentChar() == '#' -> readComment()
             currentChar() == '@' -> readTag()
             currentChar() == '|' -> readPipe()
-            currentChar() == '*' -> readAsterisk()
+            currentChar() == '*' -> readSingleChar(KarateTokenTypes.ASTERISK)
+            currentChar() == ':' -> readSingleChar(KarateTokenTypes.COLON)
             isDocStringStart() -> readDocString()
-            currentChar() == '"' -> readQuotedString('"')
-            currentChar() == '\'' -> readQuotedString('\'')
-            currentChar() == ':' -> readColon()
-            // Treat all braces and angle brackets as simple text - no special JSON or XML handling
-            currentChar() == '{' -> readSimpleBrace('{')
-            currentChar() == '}' -> readSimpleBrace('}')
-            currentChar() == '<' -> readSimpleAngleBracket('<')
-            currentChar() == '>' -> readSimpleAngleBracket('>')
-            isInTableRow && !isWhitespace(currentChar()) && currentChar() != '\n' -> readTableCell()
-            isKeywordStart() -> readKeywordOrText()
+            currentChar() == '"' -> readQuotedString('"', KarateTokenTypes.DOUBLE_QUOTED_STRING)
+            currentChar() == '\'' -> readQuotedString('\'', KarateTokenTypes.SINGLE_QUOTED_STRING)
+            currentChar() in "{}<>" -> readSingleChar(KarateTokenTypes.TEXT)
+            isInTableRow && !currentChar().isWhitespace() && currentChar() != '\n' -> readTableCell()
+            currentChar().isLetter() -> readKeywordOrText()
             else -> readText()
         }
         
-        // Check if we're at the end of a table row
         if (isInTableRow && (currentChar() == '\n' || position >= endOffset)) {
             isInTableRow = false
         }
         
-        // Ensure position always advances
         if (position == startPosition) {
-            // If no progress was made, forcibly advance position
             position++
             tokenType = KarateTokenTypes.TEXT
         }
@@ -97,320 +98,152 @@ class KarateLexer : LexerBase() {
         tokenEnd = position
     }
 
-    override fun getBufferSequence(): CharSequence = buffer ?: ""
-
-    override fun getBufferEnd(): Int = endOffset
-
     private fun currentChar(): Char = if (position < endOffset) buffer!![position] else '\u0000'
-
     private fun isAtEnd(): Boolean = position >= endOffset
 
-    private fun skipWhitespace() {
-        while (position < endOffset && isWhitespace(currentChar())) {
-            position++
-        }
+    private fun readWhitespace() {
+        while (position < endOffset && currentChar().isWhitespace()) position++
         tokenType = TokenType.WHITE_SPACE
-    }
-    
-    // Helper method to skip whitespaces without creating a token
-    private fun skipWhitespaces() {
-        while (position < endOffset && isWhitespace(currentChar())) {
-            position++
-        }
     }
 
     private fun readComment() {
-        position++ // skip '#'
-        while (position < endOffset && currentChar() != '\n') {
-            position++
-        }
+        position++
+        while (position < endOffset && currentChar() != '\n') position++
         tokenType = KarateTokenTypes.COMMENT
     }
 
     private fun readTag() {
-        position++ // skip '@'
-        while (position < endOffset && !isWhitespace(currentChar()) && currentChar() != '\n') {
-            position++
-        }
+        position++
+        while (position < endOffset && !currentChar().isWhitespace() && currentChar() != '\n') position++
         tokenType = KarateTokenTypes.TAG
     }
 
     private fun readPipe() {
-        position++ // skip '|'
-        // Check if this is the start of a table row
+        position++
         if (!isInTableRow) {
             isInTableRow = true
             isFirstTableRow = !hasSeenTableBefore()
         }
         tokenType = KarateTokenTypes.PIPE
-        
-        // After a pipe, let's check if we have a table cell to read
-        if (position < endOffset && currentChar() != '|' && !isWhitespace(currentChar()) && currentChar() != '\n') {
-            // Remember the current position so we can return to it
-            val savedPosition = position
-            position = savedPosition // Move back to start of cell content
-            
-            // We'll handle the table cell in the next advance() call
-        }
     }
 
-    private fun readAsterisk() {
-        position++ // skip '*'
-        tokenType = KarateTokenTypes.ASTERISK
-    }
-
-    private fun readQuotedString(quote: Char) {
-        position++ // skip opening quote
-        while (position < endOffset && currentChar() != quote) {
-            position++
-        }
-        if (position < endOffset) position++ // skip closing quote
-        
-        tokenType = if (quote == '"') KarateTokenTypes.DOUBLE_QUOTED_STRING else KarateTokenTypes.SINGLE_QUOTED_STRING
-    }
-
-    private fun readColon() {
+    private fun readSingleChar(type: IElementType) {
         position++
-        tokenType = KarateTokenTypes.COLON
+        tokenType = type
     }
-    
-    // Check if we're at the start of a docstring (triple quotes)
-    private fun isDocStringStart(): Boolean {
-        return position + 2 < endOffset && 
-               currentChar() == '"' && 
-               buffer!![position + 1] == '"' && 
-               buffer!![position + 2] == '"'
+
+    private fun readQuotedString(quote: Char, type: IElementType) {
+        position++
+        while (position < endOffset && currentChar() != quote) {
+            if (currentChar() == '\\' && position + 1 < endOffset) position += 2
+            else position++
+        }
+        if (position < endOffset) position++
+        tokenType = type
     }
-    
-    // Handle docstring quotes
+
+    private fun isDocStringStart(): Boolean =
+        position + 2 < endOffset && 
+        buffer!!.subSequence(position, position + 3).toString() == "\"\"\""
+
     private fun readDocString() {
-        // Handle opening/closing quotes
-        position += 3  // Skip the three quotes
+        position += 3
         tokenType = KarateTokenTypes.PYSTRING_QUOTES
     }
 
     private fun readKeywordOrText() {
         val start = position
         
-        // Handle multi-word keywords like "scenario outline"
         if (peekMultiWordKeyword()) {
             readMultiWordKeyword()
             return
         }
         
-        while (position < endOffset && (currentChar().isLetterOrDigit() || currentChar() == '_' || currentChar() == '-')) {
+        while (position < endOffset && (currentChar().isLetterOrDigit() || currentChar() in "_-")) {
             position++
         }
         
         val text = buffer!!.subSequence(start, position).toString().lowercase()
-        
-        // Remember the position after the keyword but before any colon
         val keywordEnd = position
-        val keywordText = text
         
-        // Check if the next character is a colon for keywords that need it
-        val keywordNeedsColon = text in setOf("feature", "background", "scenario", "examples", "rule", "example")
-        val followedByColon = position < endOffset && currentChar() == ':'
-        
-        // Set the token type based on the keyword text
-        tokenType = when (keywordText) {
+        tokenType = when (text) {
             "feature" -> KarateTokenTypes.FEATURE_KEYWORD
             "background" -> KarateTokenTypes.BACKGROUND_KEYWORD
             "scenario" -> KarateTokenTypes.SCENARIO_KEYWORD
             "examples" -> KarateTokenTypes.EXAMPLES_KEYWORD
             "rule" -> KarateTokenTypes.RULE_KEYWORD
             "example" -> KarateTokenTypes.EXAMPLE_KEYWORD
-            "given", "when", "then", "and", "but" -> KarateTokenTypes.STEP_KEYWORD
+            in STEP_KEYWORDS -> KarateTokenTypes.STEP_KEYWORD
             in KARATE_DSL_KEYWORDS -> KarateTokenTypes.KARATE_DSL_KEYWORD
             in HTTP_KEYWORDS -> KarateTokenTypes.HTTP_KEYWORD
-            else -> {
-                // Check if this might be a Karate action keyword
-                when {
-                    keywordText in setOf("match", "assert", "print", "call", "read", "set", "remove", "replace", "eval") -> 
-                        KarateTokenTypes.ACTION_KEYWORD
-                    else -> KarateTokenTypes.TEXT
-                }
-            }
+            in ACTION_KEYWORDS -> KarateTokenTypes.ACTION_KEYWORD
+            else -> KarateTokenTypes.TEXT
         }
         
-        // If there's a colon right after a keyword that requires it, we'll handle it
-        // by marking the current token end (which will return just the keyword)
-        if (keywordNeedsColon && followedByColon) {
-            // End the current token at the keyword boundary
+        // Handle colon for Gherkin keywords
+        if (text in GHERKIN_KEYWORDS && position < endOffset && currentChar() == ':') {
             tokenEnd = keywordEnd
-            
-            // The next call to advance() will find the colon and emit it as a separate token
-            // This allows the formatter to apply spacing after the colon
-            return
         }
     }
 
     private fun readText() {
         val start = position
         
-        while (position < endOffset && !isSpecialChar(currentChar()) && !isWhitespace(currentChar())) {
+        while (position < endOffset && !isSpecialChar(currentChar()) && !currentChar().isWhitespace()) {
             position++
         }
         
-        // Check if this is a Karate variable reference
         val text = buffer!!.subSequence(start, position).toString()
-        if (text.startsWith("#") && text.length > 1) {
-            // This is a Karate variable reference
-            tokenType = KarateTokenTypes.VARIABLE
+        tokenType = if (text.startsWith("#") && text.length > 1) {
+            KarateTokenTypes.VARIABLE
         } else {
-            // Regular text
-            tokenType = KarateTokenTypes.TEXT
+            KarateTokenTypes.TEXT
         }
     }
-
-    private fun isWhitespace(c: Char): Boolean = c.isWhitespace()
-
-    private fun isKeywordStart(): Boolean = currentChar().isLetter()
 
     private fun isSpecialChar(c: Char): Boolean = c in "@#|*\"':<>{}"
 
-    // New helper methods for enhanced functionality
-    // Commented out as we now treat all angle brackets as simple text
-    /*
-    private fun isPlaceholderStart(): Boolean {
-        return position + 1 < endOffset && (buffer!![position + 1].isLetterOrDigit() || buffer!![position + 1] == '_')
-    }
-    */
-    
-    // Commented out as we now treat all angle brackets as simple text
-    /*
-    private fun readPlaceholder() {
-        position++ // skip '<'
-        
-        // Read placeholder content if present
-        val contentStart = position
-        val variableName = StringBuilder()
-        
-        while (position < endOffset && currentChar() != '>') {
-            variableName.append(currentChar())
-            position++
-        }
-        
-        if (position < endOffset && currentChar() == '>') {
-            // Don't forget to consume the closing bracket
-            position++
-        }
-        
-        if (position - contentStart > 0) {
-            // There was content inside the placeholder
-            val content = variableName.toString()
-            
-            // Check if this variable matches a table header cell name
-            // For simplicity, we're assuming any alphanumeric placeholder is an example variable
-            // In a more sophisticated implementation, we would check if it matches a table header
-            if (content.all { it.isLetterOrDigit() || it == '_' }) {
-                tokenType = KarateTokenTypes.EXAMPLE_VARIABLE
-            } else {
-                tokenType = KarateTokenTypes.PLACEHOLDER_CONTENT
-            }
-        } else {
-            // Just an empty placeholder
-            tokenType = KarateTokenTypes.PLACEHOLDER_START
-        }
-    }
-    */
-    
-    // Simple function to treat braces as plain text
-    private fun readSimpleBrace(brace: Char) {
-        position++ // Skip the brace character
-        tokenType = KarateTokenTypes.TEXT // Treat it as plain text
-    }
-    
-    // Simple function to treat angle brackets as plain text
-    private fun readSimpleAngleBracket(bracket: Char) {
-        position++ // Skip the bracket character
-        tokenType = KarateTokenTypes.TEXT // Treat it as plain text
-    }
-    
-    private fun skipJsonString(quote: Char = '"') {
-        position++  // Skip the opening quote
-        
-        while (position < endOffset && currentChar() != quote) {
-            // Handle escaped quotes and other escaped characters
-            if (currentChar() == '\\' && position + 1 < endOffset) {
-                position += 2  // Skip the escape and the next character
-            } else {
-                position++
-            }
-        }
-        
-        // Skip the closing quote
-        if (position < endOffset) {
-            position++
-        }
-    }
-    
-    // XML-specific parsing methods removed - now using readSimpleAngleBracket instead
-    
-    private fun lookAhead(offset: Int): Char {
-        return if (position + offset < endOffset) buffer!![position + offset] else '\u0000'
-    }
-    
     private fun peekMultiWordKeyword(): Boolean {
         val remaining = buffer!!.subSequence(position, endOffset).toString().lowercase()
-        return remaining.startsWith("scenario outline") || remaining.startsWith("scenario outline:")
+        return remaining.startsWith("scenario outline")
     }
-    
+
     private fun readMultiWordKeyword() {
-        val remaining = buffer!!.subSequence(position, endOffset).toString().lowercase()
+        position += "scenario outline".length
+        tokenType = KarateTokenTypes.SCENARIO_OUTLINE_KEYWORD
         
-        when {
-            remaining.startsWith("scenario outline") -> {
-                position += "scenario outline".length
-                tokenType = KarateTokenTypes.SCENARIO_OUTLINE_KEYWORD
-                
-                // Check if the next character is a colon, but don't consume it
-                // It will be handled as a separate token in the next advance() call
-                if (position < endOffset && currentChar() == ':') {
-                    // End the current token at the "scenario outline" boundary
-                    tokenEnd = position
-                    return
-                }
-            }
+        if (position < endOffset && currentChar() == ':') {
+            tokenEnd = position
         }
     }
-    
+
     private fun hasSeenTableBefore(): Boolean {
-        // Simple heuristic: look backwards for previous pipe characters
         for (i in (position - 1) downTo startOffset) {
-            if (buffer!![i] == '|') return true
-            if (buffer!![i] == '\n') break
+            when (buffer!![i]) {
+                '|' -> return true
+                '\n' -> return false
+            }
         }
         return false
     }
-    
-    // Track table headers for example variables
-    private val tableHeaderNames = mutableListOf<String>()
-    
+
     private fun readTableCell() {
         val start = position
         
-        // Read until next pipe or end of line
         while (position < endOffset && currentChar() != '|' && currentChar() != '\n') {
             position++
         }
         
-        // Trim trailing whitespace
         var end = position
-        while (end > start && isWhitespace(buffer!![end - 1])) {
-            end--
-        }
+        while (end > start && buffer!![end - 1].isWhitespace()) end--
         
-        // Extract cell content
         val cellContent = buffer!!.subSequence(start, end).toString().trim()
         
-        // Determine if this is a header cell (in first row) or regular cell
-        if (isFirstTableRow) {
-            // This is a header cell, store its name for variable highlighting
+        tokenType = if (isFirstTableRow) {
             tableHeaderNames.add(cellContent)
-            tokenType = KarateTokenTypes.TABLE_HEADER_CELL
+            KarateTokenTypes.TABLE_HEADER_CELL
         } else {
-            tokenType = KarateTokenTypes.TABLE_CELL
+            KarateTokenTypes.TABLE_CELL
         }
     }
 }
