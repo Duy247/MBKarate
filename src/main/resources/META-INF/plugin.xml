@@ -37,7 +37,6 @@
     <depends>org.intellij.intelliLang</depends>
     <depends>JUnit</depends>
     <depends optional="true" config-file="gherkin-integration.xml">gherkin</depends>
-    <depends optional="true" config-file="cucumber-steps-integration.xml">org.jetbrains.plugins.cucumber.steps</depends>
     
     <!-- File type handling -->
     <xi:include href="/META-INF/fileType.xml" xpointer="xpointer(/idea-plugin/*)"
@@ -60,6 +59,12 @@
         
         <!-- Feature File Index -->
         <fileBasedIndex implementation="com.mb.mbplugin.karate.index.KarateFeatureIndex"/>
+        
+        <!-- Karate Tree Explorer Tool Window -->
+        <toolWindow id="Karate Tree Explorer"
+                    anchor="right"
+                    factoryClass="com.mb.mbplugin.karate.explorer.KarateTreeExplorerToolWindowFactory"
+                    icon="AllIcons.FileTypes.Any_type"/>
         
         <!-- Jira Integration Settings -->
         <projectConfigurable
@@ -93,6 +98,14 @@
             class="com.mb.mbplugin.karate.actions.ImportCurlAction"
             text="Import cURL as Karate Feature"
             description="Convert a curl command into a Karate test">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        
+        <!-- Karate Tree Explorer Action -->
+        <action id="com.mb.mbplugin.karate.explorer.ShowKarateTreeExplorerAction"
+            class="com.mb.mbplugin.karate.explorer.ShowKarateTreeExplorerAction"
+            text="Karate Tree Explorer"
+            description="Show the Karate feature tree structure with call read navigation">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
     </actions>

@@ -47,6 +47,7 @@ intellijPlatform {
             <h3>Version 1.4.0</h3>
             <ul>
               <li>Major change: Add short hand description and autocomplete </li>
+              <li>Major change: Add Karate Tree Explorer </li>
               <li>Improve code performance</li>
             </ul>
         """.trimIndent()
