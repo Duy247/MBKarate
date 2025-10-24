@@ -2,21 +2,25 @@ package com.mb.mbplugin.karate.completion
 
 import com.intellij.codeInsight.completion.*
 import com.intellij.codeInsight.lookup.LookupElementBuilder
-import com.intellij.patterns.PlatformPatterns
-import com.intellij.psi.PsiElement
-import com.intellij.util.ProcessingContext
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.editor.Document
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.patterns.PlatformPatterns
+import com.intellij.psi.PsiManager
+import com.intellij.psi.search.FileTypeIndex
+import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.util.ProcessingContext
+import com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider
+import com.mb.mbplugin.karate.index.KarateFeatureData
+import com.mb.mbplugin.karate.psi.KarateFile
+import org.jetbrains.plugins.cucumber.psi.GherkinFileType
 import org.jetbrains.plugins.cucumber.psi.GherkinLanguage
-import com.mb.mbplugin.karate.index.KarateFeatureIndex
+import java.io.File
 
-/**
- * Provides autocomplete for Karate tags with call read('classpath:...') suggestions
- * Uses ! symbol for tag-based completion and # symbol for file-based completion
- */
 class KarateTagCompletionContributor : CompletionContributor() {
-    
     init {
-        // Trigger completion more specifically - only in Gherkin files
         extend(
             CompletionType.BASIC,
             PlatformPatterns.psiElement().withLanguage(GherkinLanguage.INSTANCE),
@@ -29,747 +33,314 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
     
     companion object {
         private val LOG = Logger.getInstance(KarateTagCompletionProvider::class.java)
+        private val TAG_PATTERN = Regex("(?:^|\\s)@([\\p{L}_][\\p{L}\\p{N}_]*)", RegexOption.MULTILINE)
+        private val DOC_PATTERN = Regex("\"\"\"\\s*@([A-Za-z0-9_]+_DOC)\\s*\\n([\\s\\S]*?)\"\"\"", RegexOption.MULTILINE)
+        private val SOURCE_ROOTS = listOf("src/test/java", "src/main/java", "src/test/resources", 
+                                         "src/main/resources", "src/test/kotlin", "src/main/kotlin")
     }
     
-    override fun addCompletions(
-        parameters: CompletionParameters,
-        context: ProcessingContext,
-        result: CompletionResultSet
-    ) {
-        val element = parameters.position
-        val offset = parameters.offset
+    override fun addCompletions(parameters: CompletionParameters, context: ProcessingContext, result: CompletionResultSet) {
         val file = parameters.originalFile
-        val project = file.project
-        
-        // Get the text before cursor
+        val offset = parameters.offset
         val textBeforeCursor = file.text.substring(0, offset)
-        val lastExclamationIndex = textBeforeCursor.lastIndexOf('!')
-        val lastHashIndex = textBeforeCursor.lastIndexOf('#')
-        val lastAmpIndex = textBeforeCursor.lastIndexOf('&')
         
-        // Check if we're in a context where completion should be triggered
-        // 1. After ! symbol for tag-based completion (only in specific contexts)
-        // 2. After # symbol for feature file name completion (only in specific contexts)
+        val trigger = findTrigger(textBeforeCursor, offset) ?: return
         
-        var partialTag = ""
-        var isTagCompletion = false
-        var isFileCompletion = false
-        var isShortCompletion = false
+        when (trigger.type) {
+            TriggerType.SHORT -> handleShortCompletion(trigger, parameters, result)
+            TriggerType.TAG -> handleTagOrFileCompletion(trigger, parameters, result, true, false)
+            TriggerType.FILE -> handleTagOrFileCompletion(trigger, parameters, result, false, true)
+        }
+    }
+    
+    private fun findTrigger(text: String, offset: Int): Trigger? {
+        val lastExcl = text.lastIndexOf('!')
+        val lastHash = text.lastIndexOf('#')
+        val lastAmp = text.lastIndexOf('&')
         
-        // Check which trigger is more recent and within a stricter range
-        val maxTriggerDistance = 20 // Reduced from 50 to be more restrictive for tags
-        val maxFileCompletionDistance = 30 // Slightly more permissive for file names
+        return when {
+            lastAmp != -1 && offset - lastAmp <= 50 && lastAmp > maxOf(lastExcl, lastHash) -> {
+                Trigger(TriggerType.SHORT, lastAmp, text.substring(lastAmp + 1))
+            }
+            lastExcl != -1 && offset - lastExcl <= 20 && (lastHash == -1 || lastExcl > lastHash) -> {
+                if (lastExcl > 0 && text[lastExcl - 1].isLetterOrDigit()) return null
+                if (!isValidTagContext(text, lastExcl)) return null
+                val prefix = text.substring(lastExcl + 1).takeWhile { it.isLetterOrDigit() || it == '_' }
+                Trigger(TriggerType.TAG, lastExcl, prefix)
+            }
+            lastHash != -1 && offset - lastHash <= 30 && (lastExcl == -1 || lastHash > lastExcl) -> {
+                if (lastHash > 0 && text[lastHash - 1].let { it.isLetterOrDigit() || it == '_' }) return null
+                if (!isValidFileContext(text, lastHash)) return null
+                val prefix = text.substring(lastHash + 1).takeWhile { it.isLetterOrDigit() || it == '_' || it == '.' }
+                Trigger(TriggerType.FILE, lastHash, prefix)
+            }
+            else -> null
+        }
+    }
+    
+    private fun handleShortCompletion(trigger: Trigger, parameters: CompletionParameters, result: CompletionResultSet) {
+        result.restartCompletionOnAnyPrefixChange()
+        result.stopHere()
         
-        if (lastExclamationIndex != -1 && offset - lastExclamationIndex <= maxTriggerDistance && 
-            (lastHashIndex == -1 || lastExclamationIndex > lastHashIndex)) {
+        val project = parameters.originalFile.project
+        val docProvider = KarateFeatureDocumentationProvider()
+        
+        getAllFeatureFiles(project).forEach { vf ->
+            val psiFile = PsiManager.getInstance(project).findFile(vf) as? KarateFile ?: return@forEach
             
-            // Only trigger ! completion in valid contexts
-            if (isValidTagCompletionContext(textBeforeCursor, lastExclamationIndex)) {
-                partialTag = textBeforeCursor.substring(lastExclamationIndex + 1)
-                    .takeWhile { it.isLetterOrDigit() || it == '_' || Character.isLetter(it) }
-                isTagCompletion = true
-            }
-        } else if (lastHashIndex != -1 && offset - lastHashIndex <= maxFileCompletionDistance && 
-                   (lastExclamationIndex == -1 || lastHashIndex > lastExclamationIndex)) {
-            
-            // Only trigger # completion in valid contexts
-            if (isValidFileCompletionContext(textBeforeCursor, lastHashIndex)) {
-                partialTag = textBeforeCursor.substring(lastHashIndex + 1)
-                    .takeWhile { it.isLetterOrDigit() || it == '_' || Character.isLetter(it) || it == '.' }
-                isFileCompletion = true
-            }
-        } else if (lastAmpIndex != -1 && offset - lastAmpIndex <= 50 &&
-                (lastExclamationIndex == -1 || lastAmpIndex > lastExclamationIndex) &&
-                (lastHashIndex == -1 || lastAmpIndex > lastHashIndex)) {
-            isShortCompletion = true
-        }
-
-        
-        // If neither completion type is triggered, return early
-        if (!isTagCompletion && !isFileCompletion && !isShortCompletion) {
-            return
-        }
-
-        // Additional safety check: ensure we're not in the middle of a regular word
-        // by checking if there's a word character immediately before our trigger symbol
-        if (isTagCompletion && lastExclamationIndex > 0) {
-            val charBeforeExclamation = textBeforeCursor[lastExclamationIndex - 1]
-            if (charBeforeExclamation.isLetterOrDigit() || charBeforeExclamation == '_') {
-                // We're in the middle of a word, skip completion
-                return
-            }
-        }
-        
-        if (isFileCompletion && lastHashIndex > 0) {
-            val charBeforeHash = textBeforeCursor[lastHashIndex - 1]
-            // Only allow hash completion after whitespace, quotes, or path separators
-            if (charBeforeHash.isLetterOrDigit() || charBeforeHash == '_') {
-                // We're in the middle of a word or identifier, skip completion
-                return
-            }
-        }
-        if (isShortCompletion) {
-            result.restartCompletionOnAnyPrefixChange()
-            result.stopHere()
-
-            val project = parameters.originalFile.project
-            val prefix = textBeforeCursor.substring(lastAmpIndex + 1)
-
-            val docProvider = com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider()
-            val allFeatures = com.mb.mbplugin.karate.index.KarateFeatureIndex.getAllFeatureFiles(project)
-
-            allFeatures.forEach { vf ->
-                val psiFile = com.intellij.psi.PsiManager.getInstance(project).findFile(vf)
-                if (psiFile !is com.mb.mbplugin.karate.psi.KarateFile) return@forEach
-
-                val text = psiFile.text
-                val matcher = Regex("\"\"\"\\s*@([A-Za-z0-9_]+_DOC)\\s*\\n([\\s\\S]*?)\"\"\"", RegexOption.MULTILINE)
-                matcher.findAll(text).forEach { m ->
-                    val scenarioTag = m.groupValues[1].removeSuffix("_DOC")
-                    val docText = m.groupValues[2]
-                    val parsed = docProvider.parseDocDirectives(docText)
-                    val short = parsed.shortDescription ?: return@forEach
-
-                    // Fixed prefix filtering — fuzzy match both directions
-                    if (prefix.isNotBlank() &&
-                        prefix.contains(short, ignoreCase = true)
-                    ) return@forEach
-
-                    val relPath = getRelativePathFromSourceRoot(project, vf)
-                    val normPath = normalizeClasspathPath(relPath)
-                    val featureName = vf.nameWithoutExtension
-
-                    // === Collect param inputs ===
-                    val paramInputs = parsed.params.filter { p ->
-                        val tags = p.tags.map { it.lowercase() }
-                        "input" in tags && "required" in tags
-                    }.map { it.name }
-
-                    val paramBlock = if (paramInputs.isNotEmpty()) {
-                        paramInputs.joinToString(", ", prefix = " { ", postfix = " }") { "$it: ''" }
-                    } else ""
-
-                    // === NEW: Include snippet_before and snippet_after ===
-                    val beforeSnippet = parsed.snippetBefore?.trim()?.let { removeLeadingIndentation(it) }
-                    val afterSnippet = parsed.snippetAfter?.trim()?.let { removeLeadingIndentation(it) }
-
-                    val callLine = "* call read('classpath:${normPath}@${scenarioTag}')$paramBlock"
-
-                    // Build the full suggestion text
-                    val fullSuggestion = buildString {
-                        if (!beforeSnippet.isNullOrBlank()) {
-                            append(beforeSnippet)
-                            if (!beforeSnippet.endsWith("\n")) append("\n")
-                        }
-                        append(callLine)
-                        if (!afterSnippet.isNullOrBlank()) {
-                            append("\n")
-                            append(afterSnippet)
-                        }
-                    }
-
-                    val lookup = LookupElementBuilder.create("&${short}")
-                        .withPresentableText(short)
-                        .withTypeText("${featureName}.feature@$scenarioTag", true)
-                        .withTailText(" (${normPath})", true)
-                        .withInsertHandler { ctx, _ ->
-                            val doc = ctx.document
-                            val start = ctx.startOffset
-                            val end = ctx.tailOffset
-
-                            val lineNum = doc.getLineNumber(start)
-                            val lineStart = doc.getLineStartOffset(lineNum)
-                            val lineText = doc.getText(com.intellij.openapi.util.TextRange(lineStart, start))
-                            val ampIndex = lineText.lastIndexOf('&')
-
-                            // everything before & is just spaces → delete from there
-                            val replaceStart = if (ampIndex >= 0) lineStart + ampIndex else start
-                            val baseIndent = lineText.takeWhile { it == ' ' || it == '\t' }
-
-                            // clean out current line from the & onward
-                            doc.deleteString(replaceStart, end)
-
-                            // rebuild final text: first line has no extra indent, following do
-                            val lines = fullSuggestion.lines()
-                            val built = buildString {
-                                lines.forEachIndexed { i, raw ->
-                                    val t = raw.trimStart()
-                                    if (i > 0) append("\n").append(baseIndent)
-                                    append(t)
-                                }
-                            }
-                            doc.insertString(replaceStart, built)
-                        }
-                    result.addElement(lookup)
-                }
-            }
-
-            return
-        }
-
-        
-        // Get all matching tags and feature files
-        val matchingItems = getAllMatchingItems(project, partialTag, isTagCompletion, isFileCompletion)
-        
-        // Create completion suggestions
-        matchingItems.forEach { tagData ->
-            // Properly normalize the path for classpath usage - handles UTF-8 and spaces
-            val normalizedPath = normalizeClasspathPath(tagData.relativePath)
-            
-            if (tagData.tag.isEmpty()) {
-                // This is a feature file suggestion (tag is empty)
-                val suggestion = "* call read('classpath:${normalizedPath}')"
-                val fileName = java.io.File(tagData.absolutePath).nameWithoutExtension
+            DOC_PATTERN.findAll(psiFile.text).forEach { match ->
+                val scenarioTag = match.groupValues[1].removeSuffix("_DOC")
+                val parsed = docProvider.parseDocDirectives(match.groupValues[2])
+                val short = parsed.shortDescription ?: return@forEach
                 
-                // Create lookup string that shows the file name
-                val uniqueLookupString = fileName
-                val presentableText = "* call read('classpath:${normalizedPath}')"
+                if (trigger.prefix.isNotBlank() && trigger.prefix.contains(short, ignoreCase = true)) return@forEach
                 
-                val lookupElement = LookupElementBuilder.create(uniqueLookupString)
-                    .withPresentableText(presentableText)
-                    .withTypeText("${fileName}.feature")
-                    .withTailText(" (${normalizedPath})", true)
-                    .withInsertHandler { insertContext, _ ->
-                        handleFeatureFileInsertion(insertContext, suggestion, isTagCompletion, isFileCompletion)
-                    }
+                val normPath = getRelativePath(project, vf).replace("\\", "/")
+                val paramInputs = parsed.params.filter { p ->
+                    val tags = p.tags.map { it.lowercase() }
+                    "input" in tags && "required" in tags
+                }.map { it.name }
                 
-                result.addElement(lookupElement)
-            } else {
-                // This is a tag-based suggestion
-                val vFile = com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(java.io.File(tagData.absolutePath), true)
-                    ?: com.intellij.openapi.vfs.VirtualFileManager.getInstance().findFileByUrl("jar://${tagData.absolutePath}!/")
-                val psiFile = vFile?.let { com.intellij.psi.PsiManager.getInstance(project).findFile(it) }
-                if (psiFile == null) {
-                    LOG.debug("Skipping unresolved file: ${tagData.absolutePath}")
-                    return@forEach
-                }
-
-                var snippetBefore: String? = null
-                var snippetAfter: String? = null
-
-                var paramInputs = emptyList<String>()
-                if (psiFile is com.mb.mbplugin.karate.psi.KarateFile) {
-                    val docProvider = com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider()
-                    val docText = docProvider.extractDocumentationFromFile(psiFile, tagData.tag)
-                    if (!docText.isNullOrBlank()) {
-                        val parsed = docProvider.parseDocDirectives(docText)
-                        snippetBefore = parsed.snippetBefore
-                        snippetAfter = parsed.snippetAfter
-
-                        paramInputs = parsed.params
-                        .filter { param ->
-                            val tagsLower = param.tags.map { it.lowercase() }
-                            "input" in tagsLower && "required" in tagsLower
-                        }
-                        .map { it.name }
-
-                    }
-                }
-
                 val paramBlock = if (paramInputs.isNotEmpty()) {
                     paramInputs.joinToString(", ", prefix = " { ", postfix = " }") { "$it: ''" }
-                } else {
-                    ""
-                }
-
-                val callReadLine = "* call read('classpath:${normalizedPath}@${tagData.tag}')$paramBlock"
-
-                val fullSuggestion = buildString {
-                    val safeBefore = snippetBefore?.replace("'''", "\"\"\"")
-                    val safeAfter = snippetAfter?.replace("'''", "\"\"\"")
-
-                    if (!safeBefore.isNullOrBlank()) {
-                        append(removeLeadingIndentation(safeBefore.trimEnd()))
-                        if (!safeBefore.trimEnd().endsWith("\n")) append("\n")
-                    }
-                    append(callReadLine)
-                    if (!safeAfter.isNullOrBlank()) {
-                        append("\n")
-                        append(removeLeadingIndentation(safeAfter.trimStart()))
-                    }
-                }
-   
-                // Create a completely unique lookup string by including file path
-                val fileName = java.io.File(tagData.absolutePath).nameWithoutExtension
-                val uniqueLookupString = "!${tagData.tag}__${fileName}__${System.nanoTime()}"
+                } else ""
                 
-                // Make the presentable text show the actual suggestion
-                val presentableText = "* call read('classpath:${normalizedPath}@${tagData.tag}')"
+                val callLine = "* call read('classpath:$normPath@$scenarioTag')$paramBlock"
+                val fullSuggestion = buildSuggestion(parsed.snippetBefore, callLine, parsed.snippetAfter)
                 
-                val lookupElement = LookupElementBuilder.create(uniqueLookupString)
-                    .withPresentableText(presentableText)
-                    .withLookupString("!${tagData.tag}")  // This is what the user types to match
-                    .withTypeText("${fileName}.feature")
-                    .withTailText(" (${normalizedPath})", true)
-                    .withInsertHandler { insertContext, _ ->
-                        // Use the appropriate handler based on which trigger was used
-                        if (isFileCompletion) {
-                            // If triggered by #, use feature file insertion handler
-                            handleFeatureFileInsertion(insertContext, fullSuggestion, isTagCompletion, isFileCompletion)
-                        } else {
-                            // If triggered by !, use tag insertion handler
-                            handleTagInsertion(insertContext, fullSuggestion)
-                        }
-                    }
-                
-                result.addElement(lookupElement)
+                result.addElement(
+                    LookupElementBuilder.create("&$short")
+                        .withPresentableText(short)
+                        .withTypeText("${vf.nameWithoutExtension}.feature@$scenarioTag", true)
+                        .withTailText(" ($normPath)", true)
+                        .withInsertHandler { ctx, _ -> insertWithIndent(ctx, trigger.index, fullSuggestion, '&') }
+                )
             }
         }
     }
-
-    private fun getIndentBeforeCaret(document: com.intellij.openapi.editor.Document, offset: Int): String {
-        val lineNum = document.getLineNumber(offset)
-        val lineStart = document.getLineStartOffset(lineNum)
-        val prefix = document.getText(com.intellij.openapi.util.TextRange(lineStart, offset))
-        return prefix.takeWhile { it.isWhitespace() }
-    }
-
     
-    private fun getAllMatchingItems(
-        project: com.intellij.openapi.project.Project,
-        prefix: String,
-        isTagCompletion: Boolean,
-        isFileCompletion: Boolean
-    ): List<com.mb.mbplugin.karate.index.KarateFeatureData> {
-        val result = mutableListOf<com.mb.mbplugin.karate.index.KarateFeatureData>()
-
-        try {
-            // include files from dependencies (JARs too)
-            val allFeatureFiles = com.intellij.psi.search.FileTypeIndex.getFiles(
-                org.jetbrains.plugins.cucumber.psi.GherkinFileType.INSTANCE,
-                com.intellij.psi.search.GlobalSearchScope.allScope(project)
-            )
-
-            allFeatureFiles.forEach { virtualFile ->
-                try {
-                    val psiFile = com.intellij.psi.PsiManager.getInstance(project).findFile(virtualFile)
-
-                    val fileText = runCatching {
-                        val psiText = psiFile?.text.orEmpty()
-                        if (psiText.isNotBlank()) psiText
-                        else virtualFile.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    }.getOrNull() ?: return@forEach
-
-
-                    val relativePath = getRelativePathFromSourceRoot(project, virtualFile)
-
-                    if (isTagCompletion) {
-                        val tags = extractTagsFromFile(fileText)
-                        tags.filter { tag ->
-                            prefix.isEmpty() || tag.contains(prefix, ignoreCase = true)
-                        }.forEach { tag ->
-                            result.add(
-                                com.mb.mbplugin.karate.index.KarateFeatureData(
-                                    relativePath, tag, virtualFile.path
-                                )
-                            )
+    private fun handleTagOrFileCompletion(trigger: Trigger, parameters: CompletionParameters, 
+                                         result: CompletionResultSet, isTag: Boolean, isFile: Boolean) {
+        val project = parameters.originalFile.project
+        val items = getAllMatchingItems(project, trigger.prefix, isTag, isFile)
+        val docProvider = KarateFeatureDocumentationProvider()
+        
+        items.forEach { tagData ->
+            val normPath = tagData.relativePath.replace("\\", "/")
+            
+            if (tagData.tag.isEmpty()) {
+                addFeatureFileCompletion(result, tagData, normPath, isTag, isFile, trigger)
+            } else {
+                addTagCompletion(result, tagData, normPath, project, docProvider, isTag, isFile, trigger)
+            }
+        }
+    }
+    
+    private fun addFeatureFileCompletion(result: CompletionResultSet, tagData: KarateFeatureData, 
+                                        normPath: String, isTag: Boolean, isFile: Boolean, trigger: Trigger) {
+        val suggestion = "* call read('classpath:$normPath')"
+        val fileName = File(tagData.absolutePath).nameWithoutExtension
+        
+        result.addElement(
+            LookupElementBuilder.create(fileName)
+                .withPresentableText(suggestion)
+                .withTypeText("$fileName.feature")
+                .withTailText(" ($normPath)", true)
+                .withInsertHandler { ctx, _ -> 
+                    insertWithIndent(ctx, trigger.index, suggestion, if (isTag) '!' else '#')
+                }
+        )
+    }
+    
+    private fun addTagCompletion(result: CompletionResultSet, tagData: KarateFeatureData, normPath: String,
+                                project: Project, docProvider: KarateFeatureDocumentationProvider,
+                                isTag: Boolean, isFile: Boolean, trigger: Trigger) {
+        val vFile = findVirtualFile(tagData.absolutePath) ?: return
+        val psiFile = PsiManager.getInstance(project).findFile(vFile) as? KarateFile ?: return
+        
+        val (snippetBefore, snippetAfter, paramInputs) = extractDocInfo(psiFile, tagData.tag, docProvider)
+        
+        val paramBlock = if (paramInputs.isNotEmpty()) {
+            paramInputs.joinToString(", ", prefix = " { ", postfix = " }") { "$it: ''" }
+        } else ""
+        
+        val callLine = "* call read('classpath:$normPath@${tagData.tag}')$paramBlock"
+        val fullSuggestion = buildSuggestion(snippetBefore, callLine, snippetAfter)
+        
+        val fileName = File(tagData.absolutePath).nameWithoutExtension
+        
+        result.addElement(
+            LookupElementBuilder.create("!${tagData.tag}__${fileName}__${System.nanoTime()}")
+                .withPresentableText("* call read('classpath:$normPath@${tagData.tag}')")
+                .withLookupString("!${tagData.tag}")
+                .withTypeText("$fileName.feature")
+                .withTailText(" ($normPath)", true)
+                .withInsertHandler { ctx, _ -> 
+                    insertWithIndent(ctx, trigger.index, fullSuggestion, if (isFile) '#' else '!')
+                }
+        )
+    }
+    
+    private fun extractDocInfo(psiFile: KarateFile, tag: String, 
+                              docProvider: KarateFeatureDocumentationProvider): Triple<String?, String?, List<String>> {
+        val docText = docProvider.extractDocumentationFromFile(psiFile, tag)
+        if (docText.isNullOrBlank()) return Triple(null, null, emptyList())
+        
+        val parsed = docProvider.parseDocDirectives(docText)
+        val paramInputs = parsed.params.filter { param ->
+            val tagsLower = param.tags.map { it.lowercase() }
+            "input" in tagsLower && "required" in tagsLower
+        }.map { it.name }
+        
+        return Triple(parsed.snippetBefore, parsed.snippetAfter, paramInputs)
+    }
+    
+    private fun buildSuggestion(before: String?, main: String, after: String?): String = buildString {
+        before?.trim()?.takeIf { it.isNotBlank() }?.let {
+            append(removeIndent(it))
+            if (!it.endsWith("\n")) append("\n")
+        }
+        append(main)
+        after?.trim()?.takeIf { it.isNotBlank() }?.let {
+            append("\n")
+            append(removeIndent(it))
+        }
+    }
+    
+    private fun insertWithIndent(ctx: InsertionContext, triggerIndex: Int, suggestion: String, triggerChar: Char) {
+        val doc = ctx.document
+        doc.deleteString(ctx.startOffset, ctx.tailOffset)
+        
+        val lineNum = doc.getLineNumber(ctx.startOffset)
+        val lineStart = doc.getLineStartOffset(lineNum)
+        val lineText = doc.getText(TextRange(lineStart, ctx.startOffset))
+        
+        val charIndex = lineText.lastIndexOf(triggerChar)
+        val replaceStart = if (charIndex >= 0) lineStart + charIndex else ctx.startOffset
+        val baseIndent = lineText.takeWhile { it == ' ' || it == '\t' }
+        
+        // Find end of trigger pattern
+        val currentText = doc.text
+        var replaceEnd = replaceStart + 1
+        while (replaceEnd < currentText.length && 
+               (currentText[replaceEnd].isLetterOrDigit() || currentText[replaceEnd] == '_')) {
+            replaceEnd++
+        }
+        
+        doc.deleteString(replaceStart, replaceEnd)
+        
+        val lines = suggestion.lines()
+        val indented = buildString {
+            lines.forEachIndexed { i, line ->
+                val trimmed = line.trimStart()
+                if (i > 0) append("\n").append(baseIndent)
+                append(trimmed)
+            }
+        }
+        
+        doc.insertString(replaceStart, indented)
+    }
+    
+    private fun getAllMatchingItems(project: Project, prefix: String, 
+                                   isTag: Boolean, isFile: Boolean): List<KarateFeatureData> {
+        val result = mutableListOf<KarateFeatureData>()
+        
+        FileTypeIndex.getFiles(GherkinFileType.INSTANCE, GlobalSearchScope.allScope(project)).forEach { vf ->
+            runCatching {
+                val fileText = PsiManager.getInstance(project).findFile(vf)?.text 
+                    ?: vf.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val relativePath = getRelativePath(project, vf)
+                
+                if (isTag) {
+                    extractTags(fileText).filter { 
+                        prefix.isEmpty() || it.contains(prefix, ignoreCase = true) 
+                    }.forEach { tag ->
+                        result.add(KarateFeatureData(relativePath, tag, vf.path))
+                    }
+                }
+                
+                if (isFile) {
+                    val fileName = vf.nameWithoutExtension
+                    if (prefix.isEmpty() || fileName.contains(prefix, ignoreCase = true)) {
+                        result.add(KarateFeatureData(relativePath, "", vf.path))
+                        extractTags(fileText).forEach { tag ->
+                            result.add(KarateFeatureData(relativePath, tag, vf.path))
                         }
                     }
-
-                    if (isFileCompletion) {
-                        val fileName = virtualFile.nameWithoutExtension
-                        if (prefix.isEmpty() || fileName.contains(prefix, ignoreCase = true)) {
-                            // add the feature file itself
-                            result.add(
-                                com.mb.mbplugin.karate.index.KarateFeatureData(
-                                    relativePath, "", virtualFile.path
-                                )
-                            )
-
-                            // add all its tags
-                            val tags = extractTagsFromFile(fileText)
-                            tags.forEach { tag ->
-                                result.add(
-                                    com.mb.mbplugin.karate.index.KarateFeatureData(
-                                        relativePath, tag, virtualFile.path
-                                    )
-                                )
-                            }
-                        }
-                    }
-                } catch (_: Exception) {
-                    // ignore errors from individual files
                 }
             }
-        } catch (_: Exception) {
-            // ignore general errors
         }
-
+        
         return result.distinctBy { "${it.absolutePath}@${it.tag}" }
     }
-
-
-    private fun handleTagInsertion(
-        insertContext: com.intellij.codeInsight.completion.InsertionContext,
-        suggestion: String
-    ) {
-        val document = insertContext.document
-        val startOffset = insertContext.startOffset
-        val tailOffset = insertContext.tailOffset
-
-        // Remove what was just inserted by the completion system
-        document.deleteString(startOffset, tailOffset)
-
-        // --- Determine base indent of the current line ---
-        val lineNumber = document.getLineNumber(startOffset)
-        val lineStartOffset = document.getLineStartOffset(lineNumber)
-        val currentLinePrefix = document.getText(
-            com.intellij.openapi.util.TextRange(lineStartOffset, startOffset)
-        )
-        val baseIndent = currentLinePrefix.takeWhile { it.isWhitespace() }
-
-        // --- Apply base indent to all lines EXCEPT the first ---
-        val lines = suggestion.lines()
-        val indentedSuggestion = buildString {
-            lines.forEachIndexed { index, line ->
-                if (index == 0) append(line.trimStart())
-                else append("\n").append(baseIndent).append(line.trimStart())
-            }
-        }
-
-        // --- Find and replace the !tag pattern ---
-        val currentText = document.text
-        var replaceStart = startOffset - 1
-
-        // Go backwards to find the ! symbol
-        while (replaceStart >= 0 && currentText[replaceStart] != '!') {
-            val char = currentText[replaceStart]
-            if (!char.isLetterOrDigit() && char != '_' && !Character.isLetter(char)) {
-                break
-            }
-            replaceStart--
-        }
-
-        // If we found !, replace from there
-        if (replaceStart >= 0 && currentText[replaceStart] == '!') {
-            var replaceEnd = replaceStart + 1
-            while (replaceEnd < currentText.length &&
-                (currentText[replaceEnd].isLetterOrDigit() ||
-                        currentText[replaceEnd] == '_' ||
-                        Character.isLetter(currentText[replaceEnd]))
-            ) {
-                replaceEnd++
-            }
-            document.replaceString(replaceStart, replaceEnd, indentedSuggestion)
-        } else {
-            document.insertString(startOffset, indentedSuggestion)
-        }
-    }
-
-    private fun handleFeatureFileInsertion(
-        insertContext: InsertionContext,
-        suggestion: String,
-        isTagCompletion: Boolean,
-        isFileCompletion: Boolean
-    ) {
-        val document = insertContext.document
-        val startOffset = insertContext.startOffset
-        val tailOffset = insertContext.tailOffset
-
-        document.deleteString(startOffset, tailOffset)
-
-        if (isTagCompletion) {
-            handleTagInsertion(insertContext, suggestion)
-            return
-        }
-
-        if (isFileCompletion) {
-            val currentText = document.text
-            var replaceStart = startOffset - 1
-
-            // find '#'
-            while (replaceStart >= 0 && currentText[replaceStart] != '#') {
-                val c = currentText[replaceStart]
-                if (!c.isLetterOrDigit() && c != '_' && !Character.isLetter(c)) break
-                replaceStart--
-            }
-
-            if (replaceStart < 0 || currentText[replaceStart] != '#') {
-                document.insertString(startOffset, suggestion)
-                return
-            }
-
-            val lineNum = document.getLineNumber(replaceStart)
-            val lineStart = document.getLineStartOffset(lineNum)
-            val lineText = document.getText(com.intellij.openapi.util.TextRange(lineStart, replaceStart))
-            val baseIndent = lineText.takeWhile { it == ' ' || it == '\t' }
-
-            var replaceEnd = replaceStart + 1
-            while (replaceEnd < currentText.length &&
-                (currentText[replaceEnd].isLetterOrDigit() || currentText[replaceEnd] == '_' || Character.isLetter(currentText[replaceEnd]))) {
-                replaceEnd++
-            }
-
-            document.deleteString(replaceStart, replaceEnd)
-
-            // build with correct indent
-            val lines = suggestion.lines()
-            val built = buildString {
-                lines.forEachIndexed { i, raw ->
-                    val t = raw.trimStart()
-                    if (i > 0) append("\n").append(baseIndent)
-                    append(t)
-                }
-            }
-
-            document.insertString(replaceStart, built)
-        }
-    }
-
-
-    private fun getAllTagsStartingWith(
-        project: com.intellij.openapi.project.Project, 
-        prefix: String
-    ): List<com.mb.mbplugin.karate.index.KarateFeatureData> {
-        // This method is kept for backward compatibility but now delegates to getAllMatchingItems
-        return getAllMatchingItems(project, prefix, true, false)
-    }
     
-    private fun extractTagsFromFile(text: String): List<String> {
-        val tags = mutableListOf<String>()
-        val tagPattern = Regex("(?:^|\\s)@([\\p{L}_][\\p{L}\\p{N}_]*)", RegexOption.MULTILINE)
-        tagPattern.findAll(text).forEach { match ->
-            val tag = match.groupValues[1]
-            // Filter out documentation markers like @param, @param_input, @return, etc.
-            if (!tag.startsWith("param", ignoreCase = true) && !tag.equals("return", ignoreCase = true) && !tag.endsWith("DOC", ignoreCase = false)) {
-                tags.add(tag)
-            }
-        }
-        return tags.distinct()
-    }
+    private fun extractTags(text: String): List<String> = 
+        TAG_PATTERN.findAll(text)
+            .map { it.groupValues[1] }
+            .filter { !it.startsWith("param", true) && !it.equals("return", true) && !it.equals("short", true) && !it.equals("snippet_before", true) && !it.equals("snippet_after", true) && !it.endsWith("DOC") }
+            .distinct()
+            .toList()
     
-    private fun getRelativePathFromSourceRoot(
-        project: com.intellij.openapi.project.Project, 
-        file: com.intellij.openapi.vfs.VirtualFile
-    ): String {
+    private fun getRelativePath(project: Project, file: VirtualFile): String {
         val projectPath = project.basePath ?: return file.path
         val filePath = file.path
         
-        // Common source root patterns for Karate tests
-        val sourceRoots = listOf(
-            "src/test/java", 
-            "src/main/java", 
-            "src/test/resources", 
-            "src/main/resources",
-            "src/test/kotlin",
-            "src/main/kotlin"
-        )
-        
-        for (sourceRoot in sourceRoots) {
-            val sourceRootPath = "$projectPath/$sourceRoot".replace("/", java.io.File.separator)
-            if (filePath.startsWith(sourceRootPath)) {
-                // Return path after the source root (this is the classpath)
-                val relativePath = filePath.substring(sourceRootPath.length + 1)
-                    .replace("\\", "/")
-                    .replace(java.io.File.separator, "/")
-                // Ensure proper UTF-8 encoding and handle spaces
-                return relativePath
+        SOURCE_ROOTS.forEach { root ->
+            val rootPath = "$projectPath/$root".replace("/", File.separator)
+            if (filePath.startsWith(rootPath)) {
+                return filePath.substring(rootPath.length + 1).replace(File.separator, "/")
             }
         }
         
-        // Fallback: try to find using module source roots from IntelliJ
-        try {
-            val moduleManager = com.intellij.openapi.module.ModuleManager.getInstance(project)
-            val modules = moduleManager.modules
-            for (module in modules) {
-                val moduleRootManager = com.intellij.openapi.roots.ModuleRootManager.getInstance(module)
-                
-                // Check all source roots
-                val sourceRoots = moduleRootManager.sourceRoots
-                for (sourceRoot in sourceRoots) {
-                    if (filePath.startsWith(sourceRoot.path)) {
-                        val relativePath = filePath.substring(sourceRoot.path.length + 1)
-                            .replace("\\", "/")
-                            .replace(java.io.File.separator, "/")
-                        // Ensure proper UTF-8 encoding and handle spaces
-                        return relativePath
+        runCatching {
+            com.intellij.openapi.module.ModuleManager.getInstance(project).modules.forEach { module ->
+                com.intellij.openapi.roots.ModuleRootManager.getInstance(module).sourceRoots.forEach { root ->
+                    if (filePath.startsWith(root.path)) {
+                        return filePath.substring(root.path.length + 1).replace(File.separator, "/")
                     }
                 }
             }
-        } catch (e: Exception) {
-            // Ignore module resolution errors
         }
         
-        // Final fallback: relative to project root
         return if (filePath.startsWith(projectPath)) {
-            val relativePath = filePath.substring(projectPath.length + 1)
-                .replace("\\", "/")
-                .replace(java.io.File.separator, "/")
-            // Ensure proper UTF-8 encoding and handle spaces
-            relativePath
-        } else {
-            file.name
-        }
+            filePath.substring(projectPath.length + 1).replace(File.separator, "/")
+        } else file.name
     }
     
-    /**
-     * Normalize path for classpath usage - handles UTF-8 and spaces properly
-     * Karate's classpath supports spaces and UTF-8 characters natively,
-     * so no URL encoding is needed, just consistent forward slashes.
-     */
-    private fun normalizeClasspathPath(path: String): String {
-        // Classpath in Karate supports spaces and UTF-8 characters natively
-        // Just ensure forward slashes for consistency
-        return path.replace("\\", "/")
+    private fun findVirtualFile(path: String): VirtualFile? =
+        com.intellij.openapi.vfs.VfsUtil.findFileByIoFile(File(path), true)
+            ?: com.intellij.openapi.vfs.VirtualFileManager.getInstance().findFileByUrl("jar://$path!/")
+    
+    private fun getAllFeatureFiles(project: Project): List<VirtualFile> =
+        FileTypeIndex.getFiles(GherkinFileType.INSTANCE, GlobalSearchScope.allScope(project)).toList()
+    
+    private fun isValidTagContext(text: String, exclIndex: Int): Boolean {
+        val lineStart = text.lastIndexOf('\n', exclIndex - 1) + 1
+        val prefix = text.substring(lineStart, exclIndex).trim()
+        
+        return prefix.isEmpty() ||
+               Regex("""call\s+read\s*\(\s*['"]classpath:[^'"]*$""", RegexOption.IGNORE_CASE).containsMatchIn(prefix) ||
+               Regex("""call\s+read\s*\(\s*['"]classpath:[^'"]*\.feature$""", RegexOption.IGNORE_CASE).containsMatchIn(prefix) ||
+               Regex("""\.tags\s*\(\s*['"]$""", RegexOption.IGNORE_CASE).containsMatchIn(prefix) ||
+               (prefix.startsWith("#") && (prefix.contains("tag", true) || prefix.contains("scenario", true)))
     }
     
-    /**
-     * Check if ! completion should be triggered in the current context.
-     * Tag completion should only be triggered in specific scenarios:
-     * 1. At the beginning of a line (tag definition)
-     * 2. After 'call read(' patterns for scenario references
-     * 3. In specific test runner contexts
-     */
-    private fun isValidTagCompletionContext(textBeforeCursor: String, exclamationIndex: Int): Boolean {
-        // Get the text on the current line before the !
-        val textUpToExclamation = textBeforeCursor.substring(0, exclamationIndex)
-        val lastNewlineIndex = textUpToExclamation.lastIndexOf('\n')
-        val currentLinePrefix = if (lastNewlineIndex == -1) {
-            textUpToExclamation
-        } else {
-            textUpToExclamation.substring(lastNewlineIndex + 1)
-        }.trim()
+    private fun isValidFileContext(text: String, hashIndex: Int): Boolean {
+        val lineStart = text.lastIndexOf('\n', hashIndex - 1) + 1
+        val prefix = text.substring(lineStart, hashIndex).trim()
         
-        LOG.debug("Tag completion context check: line prefix = '$currentLinePrefix'")
-        
-        // Case 1: ! at the beginning of a line (tag definition)
-        // Only allow if it's truly at the start of a line or after whitespace
-        if (currentLinePrefix.isEmpty()) {
-            LOG.debug("Tag completion allowed: beginning of line")
-            return true
-        }
-        
-        // Case 2: After 'call read(' patterns for scenario references
-        // Look for patterns like: call read('classpath:file.feature! (but generates @tag in output)
-        val callReadWithExclamationPattern = Regex("""call\s+read\s*\(\s*['"]classpath:[^'"]*$""", RegexOption.IGNORE_CASE)
-        if (callReadWithExclamationPattern.containsMatchIn(currentLinePrefix)) {
-            LOG.debug("Tag completion allowed: call read pattern")
-            return true
-        }
-        
-        // Case 3: Within call read with file path already specified
-        // Look for: call read('classpath:some/path/file.feature! (but generates @tag in output)
-        val filePathWithExclamationPattern = Regex("""call\s+read\s*\(\s*['"]classpath:[^'"]*\.feature$""", RegexOption.IGNORE_CASE)
-        if (filePathWithExclamationPattern.containsMatchIn(currentLinePrefix)) {
-            LOG.debug("Tag completion allowed: file path with !")
-            return true
-        }
-        
-        // Case 4: In Karate tag runner contexts (like .tags("!
-        val tagsMethodPattern = Regex("""\.tags\s*\(\s*['"]$""", RegexOption.IGNORE_CASE)
-        if (tagsMethodPattern.containsMatchIn(currentLinePrefix)) {
-            LOG.debug("Tag completion allowed: tags method")
-            return true
-        }
-        
-        // Case 5: Only in specific comment contexts that make sense for tag references
-        if (currentLinePrefix.startsWith("#") && 
-            (currentLinePrefix.contains("tag", ignoreCase = true) || 
-             currentLinePrefix.contains("scenario", ignoreCase = true))) {
-            LOG.debug("Tag completion allowed: relevant comment")
-            return true
-        }
-        
-        LOG.debug("Tag completion denied: invalid context")
-        return false
+        return prefix.isEmpty() ||
+               prefix.startsWith("#") ||
+               Regex("""call\s+read\s*\(\s*['"]classpath:\s*$""", RegexOption.IGNORE_CASE).containsMatchIn(prefix) ||
+               Regex("""call\s+read\s*\(\s*['"]classpath:[^'"]*/$""", RegexOption.IGNORE_CASE).containsMatchIn(prefix) ||
+               listOf("read", "load", "include", "import", "file", "feature", "call").any { 
+                   prefix.contains(it, true) 
+               }
     }
     
-    /**
-     * Check if # completion should be triggered in the current context.
-     * File completion should be more permissive than tag completion:
-     * 1. After 'call read(' patterns for file references
-     * 2. In general contexts where # might reference a file
-     * 3. NOT in the middle of existing identifiers or inappropriate contexts
-     */
-    private fun isValidFileCompletionContext(textBeforeCursor: String, hashIndex: Int): Boolean {
-        // Get the text on the current line before the #
-        val textUpToHash = textBeforeCursor.substring(0, hashIndex)
-        val lastNewlineIndex = textUpToHash.lastIndexOf('\n')
-        val currentLinePrefix = if (lastNewlineIndex == -1) {
-            textUpToHash
-        } else {
-            textUpToHash.substring(lastNewlineIndex + 1)
-        }.trim()
-        
-        LOG.debug("File completion context check: line prefix = '$currentLinePrefix'")
-        
-        // Case 1: After 'call read(' patterns for file references
-        // Look for patterns like: call read('classpath:#
-        val callReadPattern = Regex("""call\s+read\s*\(\s*['"]classpath:\s*$""", RegexOption.IGNORE_CASE)
-        if (callReadPattern.containsMatchIn(currentLinePrefix)) {
-            LOG.debug("File completion allowed: call read pattern")
-            return true
-        }
-        
-        // Case 2: In the middle of a classpath specification
-        // Look for: call read('classpath:some/path/#
-        val classpathMidPattern = Regex("""call\s+read\s*\(\s*['"]classpath:[^'"]*/$""", RegexOption.IGNORE_CASE)
-        if (classpathMidPattern.containsMatchIn(currentLinePrefix)) {
-            LOG.debug("File completion allowed: classpath path")
-            return true
-        }
-        
-        // Case 3: In comment contexts (more permissive for file references)
-        if (currentLinePrefix.startsWith("#")) {
-            LOG.debug("File completion allowed: comment context")
-            return true
-        }
-        
-        // Case 4: After whitespace or at reasonable boundaries (more permissive)
-        // Don't allow if it's clearly in the middle of code that's not file-related
-        if (hashIndex > 0) {
-            val charBeforeHash = textBeforeCursor[hashIndex - 1]
-            
-            // Deny if it's clearly in inappropriate contexts
-            if (currentLinePrefix.contains("=") && !currentLinePrefix.contains("read") && !currentLinePrefix.contains("call")) {
-                // Looks like a variable assignment, not file reference
-                LOG.debug("File completion denied: variable assignment context")
-                return false
-            }
-            
-            if (currentLinePrefix.matches(Regex(".*\\b(def|function|class|method)\\b.*", RegexOption.IGNORE_CASE))) {
-                // Inside function/class definitions
-                LOG.debug("File completion denied: function/class definition")
-                return false
-            }
-            
-            // If it's after reasonable separators, allow it
-            if (charBeforeHash.isWhitespace() || charBeforeHash == ':' || charBeforeHash == '/' || 
-                charBeforeHash == '(' || charBeforeHash == '\'' || charBeforeHash == '"') {
-                LOG.debug("File completion allowed: after reasonable separator")
-                return true
-            }
-        }
-        
-        // Case 5: Beginning of line (more permissive)
-        if (currentLinePrefix.isEmpty()) {
-            LOG.debug("File completion allowed: beginning of line")
-            return true
-        }
-        
-        // Case 6: In contexts that might reference files
-        val fileReferenceKeywords = listOf("read", "load", "include", "import", "file", "feature", "call")
-        if (fileReferenceKeywords.any { keyword -> 
-            currentLinePrefix.contains(keyword, ignoreCase = true) 
-        }) {
-            LOG.debug("File completion allowed: file reference keywords")
-            return true
-        }
-        
-        LOG.debug("File completion denied: no valid context found")
-        return false
-    }
-
-    private fun removeLeadingIndentation(text: String, baseIndent: String = ""): String {
-        val lines = text.split("\n")
-        return buildString {
-            lines.forEachIndexed { index, line ->
-                val trimmed = line.trimStart()
-                // apply base indent to all lines
-                append(baseIndent).append(trimmed)
-                if (index != lines.lastIndex) append("\n")
-            }
-        }.trimEnd('\n', '\r')
-    }
-
+    private fun removeIndent(text: String): String =
+        text.lines().joinToString("\n") { it.trimStart() }.trimEnd('\n', '\r')
+    
+    data class Trigger(val type: TriggerType, val index: Int, val prefix: String)
+    enum class TriggerType { TAG, FILE, SHORT }
 }

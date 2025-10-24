@@ -52,7 +52,7 @@ class KarateCallReadAnnotator : Annotator {
         val documentation = docProvider.findDocumentationForFeature(project, featurePath, scenarioTag) ?: return
         val parsed = docProvider.parseDocDirectives(documentation)
 
-        // ✅ Collect only parameters that have both {input} and {required} tags
+        // Collect only parameters that have both {input} and {required} tags
         val requiredInputs = parsed.params
             .filter { p ->
                 p.tags.any { it.equals("input", true) } &&
