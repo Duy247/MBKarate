@@ -197,15 +197,18 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
     
     private fun buildSuggestion(before: String?, main: String, after: String?): String = buildString {
         before?.trim()?.takeIf { it.isNotBlank() }?.let {
-            append(removeIndent(it))
+            append(convertTripleQuotes(removeIndent(it)))
             if (!it.endsWith("\n")) append("\n")
         }
         append(main)
         after?.trim()?.takeIf { it.isNotBlank() }?.let {
             append("\n")
-            append(removeIndent(it))
+            append(convertTripleQuotes(removeIndent(it)))
         }
     }
+    
+    private fun convertTripleQuotes(text: String): String =
+        text.replace("'''", "\"\"\"")
     
     private fun insertWithIndent(ctx: InsertionContext, triggerIndex: Int, suggestion: String, triggerChar: Char) {
         val doc = ctx.document
