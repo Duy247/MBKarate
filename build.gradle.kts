@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.4.0"
+version = "1.4.1"
 
 repositories {
     mavenLocal()    
@@ -44,11 +44,9 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.4.0</h3>
+            <h3>Version 1.4.1</h3>
             <ul>
-              <li>Major change: Add short hand description and autocomplete </li>
-              <li>Major change: Add Karate Tree Explorer </li>
-              <li>Improve code performance</li>
+              <li>Major change: Add short hand playbook</li>
             </ul>
         """.trimIndent()
     }

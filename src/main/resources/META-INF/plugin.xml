@@ -66,6 +66,12 @@
                     factoryClass="com.mb.mbplugin.karate.explorer.KarateTreeExplorerToolWindowFactory"
                     icon="AllIcons.FileTypes.Any_type"/>
         
+        <!-- Short Playbook Tool Window -->
+        <toolWindow id="Short Playbook"
+                    anchor="right"
+                    factoryClass="com.mb.mbplugin.karate.playbook.ShortPlaybookToolWindowFactory"
+                    icon="AllIcons.Actions.ListFiles"/>
+        
         <!-- Jira Integration Settings -->
         <projectConfigurable
                 groupId="tools"
