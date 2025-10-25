@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.4.1.2"
+version = "1.4.1.3"
 
 repositories {
     mavenLocal()    
@@ -44,9 +44,9 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.4.1.2</h3>
+            <h3>Version 1.4.1.3</h3>
             <ul>
-              <li>Allow using short hand in Karate Tree Explorer</li>
+              <li>Minor change: Change default runner setting</li>
             </ul>
         """.trimIndent()
     }

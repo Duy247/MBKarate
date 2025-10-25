@@ -178,15 +178,17 @@ class KarateTestRunLineMarkerProvider : LineMarkerProvider {
 package {{PACKAGE_NAME}};
 
 import com.intuit.karate.junit5.Karate;
-import org.junit.jupiter.api.BeforeAll;
-import com.karate.mock.MockServerRunner;
+import com.epam.reportportal.karate.ReportPortalHook;
+import mbbank.auto.base.hook.XrayHook;
 
 class {{CLASS_NAME}} {
-    @Karate.Test
-    Karate testMockApi() {
+@Karate.Test
+    Karate testAll() {
         return Karate.run("classpath:{{FILE_PATH}}")
-                .tags("{{TAG_TEXT}}")
-                .karateEnv("local")
+                .tags("{{TAG_TEXT}}");
+                .hook(new ReportPortalHook())
+                .hook(new XrayHook())
+                .outputCucumberJson(true)
                 .relativeTo(getClass());
     }
 }

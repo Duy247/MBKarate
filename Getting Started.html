@@ -12,27 +12,27 @@
 <h3>Installation</h3>
 <ol>
     <li>Download the <code>mb-plugin.zip</code> package or install directly from the internal plugin marketplace.</li>
-    <li>Ensure you have the official <strong>Gherkin</strong> plugin installed (required for .feature file support).</li>
+    <li>Ensure you have the official <strong>Gherkin</strong> and <code>Cucumber for Java</code> plugin installed (required for .feature file support).</li>
     <li>Restart IntelliJ IDEA to activate the plugin.</li>
 </ol>
 <h3>Usage</h3>
 <ol>
-    <li> <strong>Syntax Highlighting &amp; Formatting:</strong><br> Standard <em>Gherkin</em> syntax highlighting, code
+    <li> <strong>Syntax Highlighting &amp; Formatting:</strong><br> 
+        Standard <em>Gherkin</em> syntax highlighting, code
         folding, and formatting are supported. No custom syntax extensions are added — the plugin builds upon native
         Gherkin/Cucumber behavior. 
     </li>
-    <li> <strong>Jira Issue Integration:</strong><br> Any tag following the pattern <code>@MBA-XXXXX</code> is
-        automatically detected. A small Jira icon appears in the gutter; clicking it opens the corresponding issue in
-        your default browser.<br> Configure Jira under <em>Settings → Tools → Jira Integration</em> by specifying your
-        Jira base URL and ticket pattern. 
+    <li> <strong>Jira Issue Integration:</strong><br> 
+        Any tag following the pattern <code>@MBA-XXXXX</code> is automatically detected. A small Jira icon appears in the gutter; clicking it opens the corresponding issue in your default browser.<br> 
+        Configure Jira under <em>Settings → Tools → Jira Integration</em> by specifying your Jira base URL and ticket pattern. 
     </li>
-    <li> <strong>Navigation &amp; References:</strong><br> - Ctrl/Cmd + Click supports native <em>Go to Step
-            Definition</em> for Gherkin steps.<br> 
-            - <code>call read('classpath:...')</code> navigation is enhanced — you can jump directly to the target scenario in another feature file. Also applies for target json file<br> 
-            - Missing or invalid feature paths are underlined and annotated for quick fixes. 
+    <li> <strong>Navigation &amp; References:</strong><br> 
+        - Ctrl/Cmd + Click supports native <em>Go to Step Definition</em> for Gherkin steps.<br> 
+        - <code>call read('classpath:...')</code> navigation is enhanced — you can jump directly to the target scenario in another feature file. Also applies for target json file<br> 
+        - Missing or invalid feature paths are underlined and annotated for quick fixes. 
     </li>
-    <li> <strong>DocView (Documentation Hover):</strong><br> Hover over a <code>call read</code> statement to see its
-        documentation if the target scenario includes a docstring such as:<br>
+    <li> <strong>DocView (Documentation Hover):</strong><br> 
+        Hover over a <code>call read</code> statement to see its documentation if the target scenario includes a docstring such as:<br>
         <pre><code> 
             @tag 
             Scenario: Example 
@@ -46,6 +46,7 @@
         </code></pre>
         The plugin automatically parses <br>
         <code>@param</code> (will trigger param check on <code>call read()</code> if tag {required} and {input} are involved, also autocomplete), <br>
+        <code>@short</code> allow defining a one-liner summary for the scenario that can be referred to as "short", <br>
         <code>@return</code>, <br>
         <code>@snippet_before</code> (will trigger autocomplete, the code snippet will be added <b>before</b> the <code>call read()</code>),<br>
         <code>@snippet_after</code> (same but <b>after</b> <code>call read()</code>) tags <br>
@@ -55,8 +56,9 @@
         - Native Cucumber step autocompletion. <br> 
         - <code>#</code> triggers file path and scenario completion (e.g., typing <code>#auth</code> suggests <code>auth.feature</code>).<br> 
         - <code>!</code> triggers tag-based completion (e.g., typing <code>!login</code> suggests all <code>@login</code> scenarios).<br> 
-        - Parameter hints from <code>@param</code> directives in docstrings are also included in completions. <br>
-        - snippet_before/after tags will also be suggested upon autocompletion.
+        - <code>&</code> triggers short-based completion (e.g., typing <code>&create</code> suggests scenarios with <code>@short create ...</code>).<br>
+        - Parameter hints from <code>@param</code> directives in docstrings are also included in completions. Params which are defined with tag <code>{required}</code> and <code>{inpit}</code> will be subjected to be in autocomplete<br>
+        - snippet_before/after snippet content will also be added upon autocompletion.
     </li>
     <li> <strong>Enhanced Docstring Parsing:</strong><br> The plugin supports structured documentation blocks inside
         triple quotes (<code>"""</code>):<br>
@@ -92,7 +94,17 @@
         Right-clicking inside a feature file now shows an "Import cUrl" option. Selecting this opens a dialog where you can paste a
         cUrl command. The plugin will parse the command and generate the corresponding Karate syntax, inserting it and <b>replace</b> the file content
     </li>
-    <li> <strong>Docstring Color Settings:</strong><br> 
-        Customize tag colors (e.g., <code>{required}</code>, <code>{input}</code>, <code>{optional}</code>, <code>{predefined}</code>)
+    <li> <strong>Karate Tree Explorer</strong><br> 
+        A dedicated tool window displays a hierarchical tree view of all Karate feature files in your project.<br> 
+        Features include:<br>
+        - Expand/collapse directories to navigate feature files.<br>
+        - Click on scenarios to jump directly to their definitions in the editor.<br>
+        - The tree view automatically updates when feature files are added, removed, or modified.<br>
+        There is a choice to view scenarios being call read by their short description (if any) or by their original call read line.
+    </li>
+    <li>
+        <strong>Short Playbook:</strong><br> 
+        List all short definitions across the project in a dedicated tool window for quick reference and navigation.<br>
+        The user can search for specific short definitions using a search bar at the top of the window.<br>
     </li>
 </ol>
