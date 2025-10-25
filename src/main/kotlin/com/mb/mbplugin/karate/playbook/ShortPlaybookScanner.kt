@@ -55,8 +55,11 @@ class ShortPlaybookScanner(private val project: Project) {
         // Parse all scenarios from the file
         val scenarios = parser.parseFeatureFile(karateFile)
         
-        // For each scenario with a tag, check if it has @short documentation
+        // For each scenario with a tag (excluding backgrounds), check if it has @short documentation
         for (scenario in scenarios) {
+            // Skip backgrounds as they don't have @short tags
+            if (scenario.isBackground) continue
+            
             val tag = scenario.tag ?: continue
             
             // Try to extract documentation for this scenario

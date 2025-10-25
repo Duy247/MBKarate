@@ -51,7 +51,7 @@ class CallReadNode(
     val featurePath: String,
     val scenarioTag: String?,
     val fullCallText: String
-) : KarateTreeNode(displayName, psiElement, AllIcons.Actions.Download)
+) : KarateTreeNode(displayName, psiElement, AllIcons.Nodes.PpLib)
 
 /**
  * Node representing a loading placeholder

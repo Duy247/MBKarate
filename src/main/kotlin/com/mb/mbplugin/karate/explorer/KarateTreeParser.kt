@@ -25,7 +25,7 @@ class KarateTreeParser(private val project: Project) {
     }
 
     /**
-     * Parse a Gherkin file and extract scenarios (including Scenario Outlines)
+     * Parse a Gherkin file and extract scenarios (including Scenario Outlines and Backgrounds)
      */
     fun parseFeatureFile(psiFile: PsiFile): List<ScenarioInfo> {
         if (psiFile !is GherkinFile) return emptyList()
@@ -36,10 +36,13 @@ class KarateTreeParser(private val project: Project) {
         val gherkinScenarios = PsiTreeUtil.findChildrenOfType(psiFile, GherkinScenario::class.java)
         val gherkinScenarioOutlines = PsiTreeUtil.findChildrenOfType(psiFile, GherkinScenarioOutline::class.java)
 
-        // Process regular scenarios
+        // Process regular scenarios (including backgrounds)
         for (scenario in gherkinScenarios) {
-            val scenarioName = scenario.scenarioName ?: "Unnamed Scenario"
-            val tag = extractScenarioTag(scenario)
+            val keyword = scenario.firstChild?.text?.trim()?.lowercase()
+            val isBackground = keyword == "background" || keyword == "background:"
+            
+            val scenarioName = scenario.scenarioName ?: if (isBackground) "" else "Unnamed Scenario"
+            val tag = if (!isBackground) extractScenarioTag(scenario) else null
             val steps = extractSteps(scenario)
 
             scenarios.add(
@@ -48,7 +51,8 @@ class KarateTreeParser(private val project: Project) {
                     tag = tag,
                     psiElement = scenario,
                     steps = steps,
-                    isOutline = false
+                    isOutline = false,
+                    isBackground = isBackground
                 )
             )
         }
@@ -65,7 +69,8 @@ class KarateTreeParser(private val project: Project) {
                     tag = tag,
                     psiElement = outline,
                     steps = steps,
-                    isOutline = true
+                    isOutline = true,
+                    isBackground = false
                 )
             )
         }
@@ -268,7 +273,8 @@ class KarateTreeParser(private val project: Project) {
         val tag: String?,
         val psiElement: PsiElement,
         val steps: List<StepInfo>,
-        val isOutline: Boolean = false
+        val isOutline: Boolean = false,
+        val isBackground: Boolean = false
     )
 
     data class StepInfo(

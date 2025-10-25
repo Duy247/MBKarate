@@ -62,8 +62,11 @@ class KarateTreeBuilder(private val project: Project) {
      * Build display name for scenario
      */
     private fun buildScenarioDisplayName(scenario: KarateTreeParser.ScenarioInfo): String {
-        val prefix = if (scenario.isOutline) "Scenario Outline" else "Scenario"
-        return "$prefix: ${scenario.name}"
+        return when {
+            scenario.isBackground -> "Background${if (scenario.name.isNotEmpty()) ": ${scenario.name}" else ""}"
+            scenario.isOutline -> "Scenario Outline: ${scenario.name}"
+            else -> "Scenario: ${scenario.name}"
+        }
     }
 
     /**
