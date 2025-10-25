@@ -2,6 +2,9 @@ package com.mb.mbplugin.karate.explorer
 
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiManager
+import com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider
+import com.mb.mbplugin.karate.psi.KarateFile
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 
@@ -12,6 +15,15 @@ class KarateTreeBuilder(private val project: Project) {
 
     private val parser = KarateTreeParser(project)
     private val visitedCallReads = mutableSetOf<String>() // To prevent infinite recursion
+    private val docProvider = KarateFeatureDocumentationProvider()
+    private var useShortDescriptions = false
+
+    /**
+     * Set whether to use short descriptions for call reads
+     */
+    fun setUseShortDescriptions(use: Boolean) {
+        useShortDescriptions = use
+    }
 
     /**
      * Build a tree model from a feature file
@@ -37,7 +49,7 @@ class KarateTreeBuilder(private val project: Project) {
             for (step in scenario.steps) {
                 val stepNode = DefaultMutableTreeNode(
                     StepNode(
-                        displayName = truncateText(step.text, 80),
+                        displayName = step.text, // No truncation
                         psiElement = step.psiElement,
                         stepText = step.text
                     )
@@ -45,7 +57,7 @@ class KarateTreeBuilder(private val project: Project) {
                 
                 // Add call reads to step
                 for (callRead in step.callReads) {
-                    val callReadNode = buildCallReadNode(callRead, 0)
+                    val callReadNode = buildCallReadNode(callRead, 0, psiFile)
                     stepNode.add(callReadNode)
                 }
                 
@@ -74,7 +86,8 @@ class KarateTreeBuilder(private val project: Project) {
      */
     private fun buildCallReadNode(
         callRead: KarateTreeParser.CallReadInfo,
-        depth: Int
+        depth: Int,
+        currentPsiFile: PsiFile
     ): DefaultMutableTreeNode {
         // Create a unique key for this call read to detect cycles
         val callReadKey = "${callRead.featurePath}@${callRead.scenarioTag ?: ""}"
@@ -83,7 +96,7 @@ class KarateTreeBuilder(private val project: Project) {
         if (depth > 10 || visitedCallReads.contains(callReadKey)) {
             return DefaultMutableTreeNode(
                 CallReadNode(
-                    displayName = buildCallReadDisplayName(callRead) + " (circular reference)",
+                    displayName = buildCallReadDisplayName(callRead, currentPsiFile) + " (circular reference)",
                     psiElement = callRead.psiElement,
                     featurePath = callRead.featurePath,
                     scenarioTag = callRead.scenarioTag,
@@ -96,7 +109,7 @@ class KarateTreeBuilder(private val project: Project) {
         
         val callReadNode = DefaultMutableTreeNode(
             CallReadNode(
-                displayName = buildCallReadDisplayName(callRead),
+                displayName = buildCallReadDisplayName(callRead, currentPsiFile),
                 psiElement = callRead.psiElement,
                 featurePath = callRead.featurePath,
                 scenarioTag = callRead.scenarioTag,
@@ -108,7 +121,27 @@ class KarateTreeBuilder(private val project: Project) {
         val resolved = parser.resolveCallRead(callRead)
         
         if (resolved != null) {
+            // First, check if there's a Background in the feature file
+            val background = resolved.allScenarios.firstOrNull { it.isBackground }
+            
             if (resolved.scenarios.isNotEmpty()) {
+                // Add background steps first if they exist AND we're calling a specific scenario (not the whole file)
+                // If calling the whole file, background is already in resolved.scenarios
+                if (background != null && callRead.scenarioTag != null) {
+                    val backgroundNode = DefaultMutableTreeNode(
+                        ScenarioNode(
+                            displayName = buildScenarioDisplayName(background),
+                            psiElement = background.psiElement,
+                            tag = background.tag
+                        )
+                    )
+                    
+                    // Add the background's steps
+                    addScenarioSteps(backgroundNode, background, depth + 1, currentPsiFile)
+                    
+                    callReadNode.add(backgroundNode)
+                }
+                
                 // Add each resolved scenario as a child node
                 for (scenario in resolved.scenarios) {
                     val scenarioNode = DefaultMutableTreeNode(
@@ -120,7 +153,7 @@ class KarateTreeBuilder(private val project: Project) {
                     )
                     
                     // Add the scenario's steps
-                    addScenarioSteps(scenarioNode, scenario, depth + 1)
+                    addScenarioSteps(scenarioNode, scenario, depth + 1, currentPsiFile)
                     
                     callReadNode.add(scenarioNode)
                 }
@@ -158,12 +191,13 @@ class KarateTreeBuilder(private val project: Project) {
     private fun addScenarioSteps(
         parentNode: DefaultMutableTreeNode,
         scenario: KarateTreeParser.ScenarioInfo,
-        depth: Int
+        depth: Int,
+        currentPsiFile: PsiFile
     ) {
         for (step in scenario.steps) {
             val stepNode = DefaultMutableTreeNode(
                 StepNode(
-                    displayName = truncateText(step.text, 80),
+                    displayName = step.text, // No truncation
                     psiElement = step.psiElement,
                     stepText = step.text
                 )
@@ -171,7 +205,7 @@ class KarateTreeBuilder(private val project: Project) {
             
             // Add nested call reads
             for (callRead in step.callReads) {
-                val nestedCallReadNode = buildCallReadNode(callRead, depth)
+                val nestedCallReadNode = buildCallReadNode(callRead, depth, currentPsiFile)
                 stepNode.add(nestedCallReadNode)
             }
             
@@ -182,7 +216,16 @@ class KarateTreeBuilder(private val project: Project) {
     /**
      * Build display name for call read
      */
-    private fun buildCallReadDisplayName(callRead: KarateTreeParser.CallReadInfo): String {
+    private fun buildCallReadDisplayName(callRead: KarateTreeParser.CallReadInfo, currentPsiFile: PsiFile): String {
+        // If short descriptions are enabled and we have a scenario tag, try to get @short
+        if (useShortDescriptions && callRead.scenarioTag != null) {
+            val shortDesc = getShortDescription(callRead.featurePath, callRead.scenarioTag, currentPsiFile)
+            if (shortDesc != null) {
+                return "* $shortDesc" // No truncation
+            }
+        }
+        
+        // Default display - no truncation
         val fileName = callRead.featurePath.substringAfterLast('/')
         return if (callRead.scenarioTag != null) {
             "* call read '$fileName@${callRead.scenarioTag}'"
@@ -192,13 +235,30 @@ class KarateTreeBuilder(private val project: Project) {
     }
 
     /**
-     * Truncate text to a maximum length
+     * Get @short description for a scenario (cached from current file to avoid EDT issues)
      */
-    private fun truncateText(text: String, maxLength: Int): String {
-        return if (text.length > maxLength) {
-            text.substring(0, maxLength) + "..."
-        } else {
-            text
+    private fun getShortDescription(featurePath: String, scenarioTag: String, currentPsiFile: PsiFile): String? {
+        try {
+            // Find the feature file by resolving it through the parser
+            val resolved = parser.resolveCallRead(
+                KarateTreeParser.CallReadInfo(
+                    featurePath = featurePath,
+                    scenarioTag = scenarioTag,
+                    psiElement = currentPsiFile,
+                    fullCallText = ""
+                )
+            ) ?: return null
+            
+            val psiFile = resolved.psiFile as? KarateFile ?: return null
+            
+            // Extract documentation for the scenario tag
+            val docText = docProvider.extractDocumentationFromFile(psiFile, scenarioTag) ?: return null
+            
+            // Parse to get @short
+            val parsed = docProvider.parseDocDirectives(docText)
+            return parsed.shortDescription
+        } catch (e: Exception) {
+            return null
         }
     }
 }

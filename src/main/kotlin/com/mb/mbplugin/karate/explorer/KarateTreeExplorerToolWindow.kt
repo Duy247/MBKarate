@@ -16,13 +16,15 @@ import com.intellij.psi.PsiManager
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.treeStructure.Tree
+import com.intellij.util.ui.JBUI
 import org.jetbrains.plugins.cucumber.psi.GherkinFile
 import java.awt.BorderLayout
+import java.awt.FlowLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-import javax.swing.JLabel
-import javax.swing.JPanel
-import javax.swing.SwingUtilities
+import javax.swing.*
+import javax.swing.event.TreeExpansionEvent
+import javax.swing.event.TreeExpansionListener
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeCellRenderer
 import javax.swing.tree.DefaultTreeModel
@@ -50,6 +52,8 @@ class KarateTreeExplorerPanel(private val project: Project) : JPanel(BorderLayou
     private val tree: Tree
     private val treeBuilder = KarateTreeBuilder(project)
     private var currentFile: PsiFile? = null
+    private var useShortDescriptions = false
+    private val shortToggle: JCheckBox
 
     init {
         // Create the tree
@@ -92,14 +96,73 @@ class KarateTreeExplorerPanel(private val project: Project) : JPanel(BorderLayou
             }
         })
 
+        // Add tree expansion listener to auto-expand call reads
+        tree.addTreeExpansionListener(object : TreeExpansionListener {
+            override fun treeExpanded(event: TreeExpansionEvent) {
+                val path = event.path
+                val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return
+                val userObject = node.userObject
+                
+                // When a scenario is expanded, auto-expand its call read children by one level
+                if (userObject is ScenarioNode) {
+                    expandCallReadsInNode(node)
+                }
+            }
+
+            override fun treeCollapsed(event: TreeExpansionEvent) {
+                // Do nothing on collapse
+            }
+        })
+
+        // Create toggle for short descriptions
+        shortToggle = JCheckBox("Short", false).apply {
+            toolTipText = "Show @short descriptions for call reads"
+            addActionListener {
+                useShortDescriptions = isSelected
+                treeBuilder.setUseShortDescriptions(useShortDescriptions)
+                refreshTree()
+            }
+        }
+
         // Add to panel
         val scrollPane = JBScrollPane(tree)
         add(scrollPane, BorderLayout.CENTER)
 
-        // Add info label at the top
-        val infoLabel = JLabel("Right-click in a feature file and select 'Karate Tree Explorer' to view its structure")
-        infoLabel.border = javax.swing.BorderFactory.createEmptyBorder(5, 5, 5, 5)
-        add(infoLabel, BorderLayout.NORTH)
+        // Create top panel with info label and toggle
+        val topPanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(5)
+            
+            val infoLabel = JLabel("Right-click in a feature file and select 'Karate Tree Explorer' to view its structure")
+            add(infoLabel, BorderLayout.CENTER)
+            
+            val controlPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 5, 0))
+            controlPanel.add(shortToggle)
+            add(controlPanel, BorderLayout.EAST)
+        }
+        
+        add(topPanel, BorderLayout.NORTH)
+    }
+
+    /**
+     * Auto-expand call read nodes within a scenario node
+     */
+    private fun expandCallReadsInNode(scenarioNode: DefaultMutableTreeNode) {
+        // Iterate through children (steps)
+        for (i in 0 until scenarioNode.childCount) {
+            val stepNode = scenarioNode.getChildAt(i) as? DefaultMutableTreeNode ?: continue
+            
+            // Iterate through step's children (call reads)
+            for (j in 0 until stepNode.childCount) {
+                val callReadNode = stepNode.getChildAt(j) as? DefaultMutableTreeNode ?: continue
+                val userObject = callReadNode.userObject
+                
+                // If it's a call read node, expand it by one level
+                if (userObject is CallReadNode) {
+                    val path = TreePath((tree.model as DefaultTreeModel).getPathToRoot(callReadNode))
+                    tree.expandPath(path)
+                }
+            }
+        }
     }
 
     /**

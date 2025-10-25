@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.4.1.1"
+version = "1.4.1.2"
 
 repositories {
     mavenLocal()    
@@ -44,10 +44,9 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.4.1.1</h3>
+            <h3>Version 1.4.1.2</h3>
             <ul>
-              <li>Bug fix: Background display as Scenario in Karate Tree Explorer</li>
-              <li>Use appropriate icon for call read element in Karate Tree Explorer</li>
+              <li>Allow using short hand in Karate Tree Explorer</li>
             </ul>
         """.trimIndent()
     }
