@@ -9,210 +9,134 @@ import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.Transferable
 import java.awt.event.*
 import javax.swing.*
-import javax.swing.table.DefaultTableCellRenderer
-import javax.swing.table.DefaultTableModel
-import javax.swing.table.JTableHeader
-import javax.swing.Timer
+import javax.swing.table.*
 
-/**
- * Panel containing the spreadsheet-like table editor for Examples
- */
 class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayout()) {
     
-    private var tableModel: DefaultTableModel = DefaultTableModel()
-    private val table: JBTable = JBTable(tableModel)
+    private var tableModel = DefaultTableModel()
+    private val table = JBTable(tableModel).apply {
+        autoResizeMode = JTable.AUTO_RESIZE_OFF
+        setDefaultEditor(Any::class.java, DefaultCellEditor(JTextField()))
+        fillsViewportHeight = true
+        dragEnabled = true
+        dropMode = DropMode.INSERT_ROWS
+    }
     private var currentExamplesElement: PsiElement? = null
     private var updateTimer: Timer? = null
     private var rowHeaderTable: JTable? = null
-    private var scrollPane: JBScrollPane? = null
     
     init {
         setupUI()
     }
     
     private fun setupUI() {
-        // Configure table
-        table.autoResizeMode = JTable.AUTO_RESIZE_OFF
-        table.setDefaultEditor(Any::class.java, DefaultCellEditor(JTextField()))
-        table.fillsViewportHeight = true
-        table.dragEnabled = true
-        table.dropMode = DropMode.INSERT_ROWS
-        
-        // Enable column reordering
-        table.tableHeader.reorderingAllowed = true
-        
-        // Custom table header with add column buttons
-        table.tableHeader = createCustomTableHeader()
-        
-        // Add keyboard shortcuts for copy/paste
+        table.tableHeader = createCustomTableHeader().apply { reorderingAllowed = true }
         setupKeyboardShortcuts()
-        
-        // Add right-click context menu
         setupContextMenu()
-        
-        // Add header context menu for renaming
         setupHeaderContextMenu()
+        setupRowDragAndDrop()
+        setupColumnReorderListener()
         
-        // Create scroll pane
-        scrollPane = JBScrollPane(table)
+        val scrollPane = JBScrollPane(table)
+        add(scrollPane, BorderLayout.CENTER)
+        setupRowHeaderColumn(scrollPane)
         
-        // Add components
-        add(scrollPane!!, BorderLayout.CENTER)
-        
-        // Add row number column with add buttons (after scroll pane is created)
-        setupRowHeaderColumn(scrollPane!!)
-        
-        // Add table model listener to update document in real-time with debouncing
         tableModel.addTableModelListener {
             scheduleDocumentUpdate()
-            // Update row header to reflect new row count
             updateRowHeader()
         }
-        
-        // Setup drag and drop for rows
-        setupRowDragAndDrop()
-        
-        // Setup column reorder listener
-        setupColumnReorderListener()
     }
     
-    /**
-     * Create custom table header with add column button on the right
-     */
-    private fun createCustomTableHeader(): JTableHeader {
-        val header = object : JTableHeader(table.columnModel) {
-            override fun paintComponent(g: Graphics) {
-                super.paintComponent(g)
-                
-                // Draw + button at the right edge
-                val g2 = g as Graphics2D
-                g2.color = Color(100, 150, 255)
-                
-                val buttonX = width - 30
-                val buttonY = (height - 20) / 2
-                
-                g2.fillRect(buttonX, buttonY, 20, 20)
-                g2.color = Color.WHITE
-                g2.drawString("+", buttonX + 6, buttonY + 15)
+    private fun createCustomTableHeader() = object : JTableHeader(table.columnModel) {
+        override fun paintComponent(g: Graphics) {
+            super.paintComponent(g)
+            (g as Graphics2D).apply {
+                color = Color(100, 150, 255)
+                val x = width - 30
+                val y = (height - 20) / 2
+                fillRect(x, y, 20, 20)
+                color = Color.WHITE
+                drawString("+", x + 6, y + 15)
             }
         }
-        
-        header.addMouseListener(object : MouseAdapter() {
+    }.apply {
+        addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
-                val buttonX = header.width - 30
-                val buttonY = (header.height - 20) / 2
-                
-                if (e.x >= buttonX && e.x <= buttonX + 20 && 
-                    e.y >= buttonY && e.y <= buttonY + 20) {
-                    addColumn()
-                }
+                val x = width - 30
+                val y = (height - 20) / 2
+                if (e.x in x..(x + 20) && e.y in y..(y + 20)) addColumn()
             }
         })
-        
-        header.cursor = Cursor(Cursor.DEFAULT_CURSOR)
-        return header
     }
     
-    /**
-     * Setup row header column with add row buttons
-     */
     private fun setupRowHeaderColumn(scrollPane: JBScrollPane) {
         rowHeaderTable = JTable(object : DefaultTableModel() {
             override fun getRowCount() = table.model.rowCount
             override fun getColumnCount() = 1
-            override fun getValueAt(row: Int, column: Int) = "+"
-            override fun isCellEditable(row: Int, column: Int) = false
-        })
-        
-        rowHeaderTable!!.setDefaultRenderer(Any::class.java, object : DefaultTableCellRenderer() {
-            override fun getTableCellRendererComponent(
-                table: JTable, value: Any?, isSelected: Boolean,
-                hasFocus: Boolean, row: Int, column: Int
-            ): Component {
-                val label = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column) as JLabel
-                label.horizontalAlignment = CENTER
-                label.background = Color(240, 240, 240)
-                label.foreground = Color(100, 150, 255)
-                label.font = Font(label.font.name, Font.BOLD, 14)
-                label.border = BorderFactory.createLineBorder(Color(200, 200, 200))
-                return label
-            }
-        })
-        
-        rowHeaderTable!!.preferredScrollableViewportSize = Dimension(25, 0)
-        rowHeaderTable!!.setShowGrid(false)
-        rowHeaderTable!!.columnModel.getColumn(0).preferredWidth = 25
-        rowHeaderTable!!.columnModel.getColumn(0).maxWidth = 25
-        rowHeaderTable!!.columnModel.getColumn(0).minWidth = 25
-        rowHeaderTable!!.intercellSpacing = Dimension(0, 0)
-        
-        // Synchronize row heights
-        syncRowHeights()
-        
-        rowHeaderTable!!.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                val row = rowHeaderTable!!.rowAtPoint(e.point)
-                if (row >= 0) {
-                    addRowAt(row + 1)
+            override fun getValueAt(row: Int, col: Int) = "+"
+            override fun isCellEditable(row: Int, col: Int) = false
+        }).apply {
+            setDefaultRenderer(Any::class.java, object : DefaultTableCellRenderer() {
+                override fun getTableCellRendererComponent(table: JTable, value: Any?, 
+                    isSelected: Boolean, hasFocus: Boolean, row: Int, col: Int) =
+                    (super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, col) as JLabel).apply {
+                        horizontalAlignment = CENTER
+                        background = Color(240, 240, 240)
+                        foreground = Color(100, 150, 255)
+                        font = Font(font.name, Font.BOLD, 14)
+                        border = BorderFactory.createLineBorder(Color(200, 200, 200))
+                    }
+            })
+            preferredScrollableViewportSize = Dimension(25, 0)
+            setShowGrid(false)
+            columnModel.getColumn(0).apply { preferredWidth = 25; maxWidth = 25; minWidth = 25 }
+            intercellSpacing = Dimension(0, 0)
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    rowAtPoint(e.point).takeIf { it >= 0 }?.let { addRowAt(it + 1) }
                 }
-            }
-        })
+            })
+        }
         
         scrollPane.setRowHeaderView(rowHeaderTable)
+        syncRowHeights()
     }
     
-    /**
-     * Synchronize row heights between main table and row header
-     */
     private fun syncRowHeights() {
-        // Set all rows in row header to match main table heights
-        for (row in 0 until minOf(table.rowCount, rowHeaderTable?.rowCount ?: 0)) {
-            rowHeaderTable?.setRowHeight(row, table.getRowHeight(row))
+        (0 until minOf(table.rowCount, rowHeaderTable?.rowCount ?: 0)).forEach { 
+            rowHeaderTable?.setRowHeight(it, table.getRowHeight(it))
         }
     }
     
-    /**
-     * Update row header count without recreating it
-     */
     private fun updateRowHeader() {
-        rowHeaderTable?.let { header ->
-            (header.model as DefaultTableModel).fireTableDataChanged()
+        rowHeaderTable?.apply {
+            (model as DefaultTableModel).fireTableDataChanged()
             syncRowHeights()
-            header.revalidate()
-            header.repaint()
+            revalidate()
+            repaint()
         }
     }
     
-    /**
-     * Setup drag and drop for reordering rows
-     */
     private fun setupRowDragAndDrop() {
         table.transferHandler = object : TransferHandler() {
             private var draggedRow = -1
             
-            override fun getSourceActions(c: JComponent): Int = MOVE
+            override fun getSourceActions(c: JComponent) = MOVE
             
-            override fun createTransferable(c: JComponent): Transferable? {
-                draggedRow = table.selectedRow
-                return object : Transferable {
-                    override fun getTransferDataFlavors() = arrayOf(DataFlavor.stringFlavor)
-                    override fun isDataFlavorSupported(flavor: DataFlavor) = flavor == DataFlavor.stringFlavor
-                    override fun getTransferData(flavor: DataFlavor) = "row"
-                }
+            override fun createTransferable(c: JComponent) = object : Transferable {
+                init { draggedRow = table.selectedRow }
+                override fun getTransferDataFlavors() = arrayOf(DataFlavor.stringFlavor)
+                override fun isDataFlavorSupported(flavor: DataFlavor) = flavor == DataFlavor.stringFlavor
+                override fun getTransferData(flavor: DataFlavor) = "row"
             }
             
-            override fun canImport(support: TransferSupport): Boolean {
-                return support.isDataFlavorSupported(DataFlavor.stringFlavor)
-            }
+            override fun canImport(support: TransferSupport) = 
+                support.isDataFlavorSupported(DataFlavor.stringFlavor)
             
             override fun importData(support: TransferSupport): Boolean {
-                if (!canImport(support)) return false
-                
-                val dropLocation = support.dropLocation
-                if (dropLocation is JTable.DropLocation) {
-                    val dropRow = dropLocation.row
-                    if (draggedRow != -1 && dropRow != -1 && draggedRow != dropRow) {
-                        moveRow(draggedRow, dropRow)
+                (support.dropLocation as? JTable.DropLocation)?.let { loc ->
+                    if (draggedRow != -1 && loc.row != -1 && draggedRow != loc.row) {
+                        moveRow(draggedRow, loc.row)
                         return true
                     }
                 }
@@ -221,126 +145,64 @@ class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayo
         }
     }
     
-    /**
-     * Move a row from one position to another
-     */
-    private fun moveRow(fromIndex: Int, toIndex: Int) {
-        if (fromIndex < 0 || toIndex < 0 || fromIndex >= tableModel.rowCount) return
+    private fun moveRow(from: Int, to: Int) {
+        if (from !in 0 until tableModel.rowCount || to < 0) return
         
-        val targetIndex = if (toIndex > fromIndex) toIndex - 1 else toIndex
+        val target = if (to > from) to - 1 else to
+        val rowData = (0 until tableModel.columnCount).map { tableModel.getValueAt(from, it) }
         
-        // Extract the row data
-        val rowData = mutableListOf<Any?>()
-        for (col in 0 until tableModel.columnCount) {
-            rowData.add(tableModel.getValueAt(fromIndex, col))
-        }
-        
-        // Remove the row
-        tableModel.removeRow(fromIndex)
-        
-        // Insert at new position
-        val finalIndex = if (targetIndex > tableModel.rowCount) tableModel.rowCount else targetIndex
-        tableModel.insertRow(finalIndex, rowData.toTypedArray())
-        
-        // Select the moved row
-        table.setRowSelectionInterval(finalIndex, finalIndex)
-        
+        tableModel.removeRow(from)
+        tableModel.insertRow(target.coerceAtMost(tableModel.rowCount), rowData.toTypedArray())
+        table.setRowSelectionInterval(target.coerceAtMost(tableModel.rowCount - 1), target.coerceAtMost(tableModel.rowCount - 1))
         scheduleDocumentUpdate()
     }
     
-    /**
-     * Setup right-click context menu for removing rows/columns
-     */
     private fun setupContextMenu() {
-        val popupMenu = JPopupMenu()
-        
-        val removeRowItem = JMenuItem("Remove Row")
-        removeRowItem.addActionListener {
-            val selectedRow = table.selectedRow
-            if (selectedRow != -1) {
-                removeRow(selectedRow)
-            }
+        val popup = JPopupMenu().apply {
+            add(JMenuItem("Remove Row").apply { 
+                addActionListener { table.selectedRow.takeIf { it != -1 }?.let(::removeRow) }
+            })
+            add(JMenuItem("Remove Column").apply {
+                addActionListener { table.selectedColumn.takeIf { it != -1 }?.let(::removeColumn) }
+            })
         }
-        
-        val removeColumnItem = JMenuItem("Remove Column")
-        removeColumnItem.addActionListener {
-            val selectedCol = table.selectedColumn
-            if (selectedCol != -1) {
-                removeColumn(selectedCol)
-            }
-        }
-        
-        popupMenu.add(removeRowItem)
-        popupMenu.add(removeColumnItem)
         
         table.addMouseListener(object : MouseAdapter() {
-            override fun mousePressed(e: MouseEvent) {
-                if (e.isPopupTrigger) {
-                    showPopup(e)
-                }
-            }
-            
-            override fun mouseReleased(e: MouseEvent) {
-                if (e.isPopupTrigger) {
-                    showPopup(e)
-                }
-            }
+            override fun mousePressed(e: MouseEvent) = if (e.isPopupTrigger) showPopup(e) else Unit
+            override fun mouseReleased(e: MouseEvent) = if (e.isPopupTrigger) showPopup(e) else Unit
             
             private fun showPopup(e: MouseEvent) {
-                val row = table.rowAtPoint(e.point)
-                val col = table.columnAtPoint(e.point)
-                
-                if (row >= 0 && col >= 0) {
-                    table.setRowSelectionInterval(row, row)
-                    table.setColumnSelectionInterval(col, col)
-                    popupMenu.show(e.component, e.x, e.y)
+                val r = table.rowAtPoint(e.point)
+                val c = table.columnAtPoint(e.point)
+                if (r >= 0 && c >= 0) {
+                    table.setRowSelectionInterval(r, r)
+                    table.setColumnSelectionInterval(c, c)
+                    popup.show(e.component, e.x, e.y)
                 }
             }
         })
     }
     
-    /**
-     * Setup right-click context menu for header to rename columns
-     */
     private fun setupHeaderContextMenu() {
-        val headerPopup = JPopupMenu()
-        val renameItem = JMenuItem("Rename Column")
-        
-        renameItem.addActionListener {
-            val selectedColumn = table.selectedColumn
-            if (selectedColumn != -1) {
-                renameColumn(selectedColumn)
-            }
+        val popup = JPopupMenu().apply {
+            add(JMenuItem("Rename Column").apply {
+                addActionListener { table.selectedColumn.takeIf { it != -1 }?.let(::renameColumn) }
+            })
         }
         
-        headerPopup.add(renameItem)
-        
         table.tableHeader.addMouseListener(object : MouseAdapter() {
-            override fun mousePressed(e: MouseEvent) {
-                if (e.isPopupTrigger) {
-                    showHeaderPopup(e)
-                }
-            }
+            override fun mousePressed(e: MouseEvent) = if (e.isPopupTrigger) showPopup(e) else Unit
+            override fun mouseReleased(e: MouseEvent) = if (e.isPopupTrigger) showPopup(e) else Unit
             
-            override fun mouseReleased(e: MouseEvent) {
-                if (e.isPopupTrigger) {
-                    showHeaderPopup(e)
-                }
-            }
-            
-            private fun showHeaderPopup(e: MouseEvent) {
-                val col = table.columnAtPoint(Point(e.x, 0))
-                if (col >= 0) {
-                    table.setColumnSelectionInterval(col, col)
-                    headerPopup.show(e.component, e.x, e.y)
+            private fun showPopup(e: MouseEvent) {
+                table.columnAtPoint(Point(e.x, 0)).takeIf { it >= 0 }?.let { c ->
+                    table.setColumnSelectionInterval(c, c)
+                    popup.show(e.component, e.x, e.y)
                 }
             }
         })
     }
     
-    /**
-     * Setup listener for column reordering
-     */
     private fun setupColumnReorderListener() {
         table.columnModel.addColumnModelListener(object : javax.swing.event.TableColumnModelListener {
             override fun columnAdded(e: javax.swing.event.TableColumnModelEvent?) {}
@@ -349,8 +211,7 @@ class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayo
             override fun columnMarginChanged(e: javax.swing.event.ChangeEvent?) {}
             
             override fun columnMoved(e: javax.swing.event.TableColumnModelEvent?) {
-                if (e != null && e.fromIndex != e.toIndex) {
-                    // Column was reordered, update the model to match
+                e?.takeIf { it.fromIndex != it.toIndex }?.let {
                     SwingUtilities.invokeLater {
                         reorderColumnsInModel()
                         scheduleDocumentUpdate()
@@ -360,314 +221,165 @@ class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayo
         })
     }
     
-    /**
-     * Reorder columns in the table model to match the view order
-     */
     private fun reorderColumnsInModel() {
-        val columnCount = table.columnCount
-        if (columnCount == 0) return
+        if (table.columnCount == 0) return
         
-        // Get current view order
-        val viewOrder = IntArray(columnCount) { table.convertColumnIndexToModel(it) }
-        
-        // Create new model with reordered columns
-        val newModel = DefaultTableModel()
-        
-        // Add columns in new order
-        for (viewCol in viewOrder) {
-            newModel.addColumn(tableModel.getColumnName(viewCol))
-        }
-        
-        // Add rows with reordered data
-        for (row in 0 until tableModel.rowCount) {
-            val rowData = mutableListOf<Any?>()
-            for (viewCol in viewOrder) {
-                rowData.add(tableModel.getValueAt(row, viewCol))
+        val viewOrder = IntArray(table.columnCount) { table.convertColumnIndexToModel(it) }
+        tableModel = DefaultTableModel().apply {
+            viewOrder.forEach { addColumn(tableModel.getColumnName(it)) }
+            (0 until tableModel.rowCount).forEach { r ->
+                addRow(viewOrder.map { tableModel.getValueAt(r, it) }.toTypedArray())
             }
-            newModel.addRow(rowData.toTypedArray())
         }
-        
-        // Replace the model
-        tableModel = newModel
         table.model = tableModel
-        
-        // Re-add listener
         tableModel.addTableModelListener {
             scheduleDocumentUpdate()
             updateRowHeader()
         }
     }
     
-    /**
-     * Rename a column
-     */
-    private fun renameColumn(columnIndex: Int) {
-        val currentName = tableModel.getColumnName(columnIndex)
-        val newName = JOptionPane.showInputDialog(
-            this,
-            "Enter new column name:",
-            currentName
-        )
-        
-        if (newName != null && newName.isNotBlank() && newName != currentName) {
-            // Get all column names
-            val columnNames = mutableListOf<String>()
-            for (i in 0 until tableModel.columnCount) {
-                columnNames.add(if (i == columnIndex) newName else tableModel.getColumnName(i))
-            }
-            
-            // Get all row data
-            val rowsData = mutableListOf<Array<Any?>>()
-            for (row in 0 until tableModel.rowCount) {
-                val rowData = Array<Any?>(tableModel.columnCount) { col ->
-                    tableModel.getValueAt(row, col)
+    private fun renameColumn(idx: Int) {
+        JOptionPane.showInputDialog(this, "Enter new column name:", tableModel.getColumnName(idx))
+            ?.takeIf { it.isNotBlank() && it != tableModel.getColumnName(idx) }?.let { newName ->
+                tableModel = DefaultTableModel().apply {
+                    (0 until tableModel.columnCount).forEach { 
+                        addColumn(if (it == idx) newName else tableModel.getColumnName(it))
+                    }
+                    (0 until tableModel.rowCount).forEach { r ->
+                        addRow(Array(tableModel.columnCount) { c -> tableModel.getValueAt(r, c) })
+                    }
                 }
-                rowsData.add(rowData)
-            }
-            
-            // Create new model with renamed column
-            val newModel = DefaultTableModel()
-            columnNames.forEach { newModel.addColumn(it) }
-            rowsData.forEach { newModel.addRow(it) }
-            
-            // Replace model
-            tableModel = newModel
-            table.model = tableModel
-            
-            // Re-add listener
-            tableModel.addTableModelListener {
+                table.model = tableModel
+                tableModel.addTableModelListener {
+                    scheduleDocumentUpdate()
+                    updateRowHeader()
+                }
                 scheduleDocumentUpdate()
-                updateRowHeader()
             }
-            
-            scheduleDocumentUpdate()
-        }
     }
     
     private fun setupKeyboardShortcuts() {
-        // Handle Ctrl+V for paste
         table.addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
-                if (e.isControlDown && e.keyCode == KeyEvent.VK_V) {
-                    pasteFromClipboard()
-                    e.consume()
-                } else if (e.keyCode == KeyEvent.VK_DELETE || e.keyCode == KeyEvent.VK_BACK_SPACE) {
-                    deleteSelectedCells()
-                    e.consume()
+                when {
+                    e.isControlDown && e.keyCode == KeyEvent.VK_V -> pasteFromClipboard()
+                    e.keyCode in listOf(KeyEvent.VK_DELETE, KeyEvent.VK_BACK_SPACE) -> deleteSelectedCells()
+                    else -> return
                 }
+                e.consume()
             }
         })
     }
     
     private fun pasteFromClipboard() {
-        try {
-            val clipboard = Toolkit.getDefaultToolkit().systemClipboard
-            val contents = clipboard.getContents(null)
+        runCatching {
+            val data = Toolkit.getDefaultToolkit().systemClipboard.getContents(null)
+                ?.takeIf { it.isDataFlavorSupported(DataFlavor.stringFlavor) }
+                ?.getTransferData(DataFlavor.stringFlavor) as? String ?: return
             
-            if (contents != null && contents.isDataFlavorSupported(DataFlavor.stringFlavor)) {
-                val data = contents.getTransferData(DataFlavor.stringFlavor) as String
-                val rows = data.split("\n")
-                
-                val selectedRow = table.selectedRow
-                val selectedCol = table.selectedColumn
-                
-                if (selectedRow != -1 && selectedCol != -1) {
-                    rows.forEachIndexed { rowIndex, rowData ->
-                        val cells = rowData.split("\t")
-                        cells.forEachIndexed { colIndex, cellValue ->
-                            val targetRow = selectedRow + rowIndex
-                            val targetCol = selectedCol + colIndex
-                            
-                            // Expand table if needed
-                            while (tableModel.rowCount <= targetRow) {
-                                addRowSilently()
-                            }
-                            while (tableModel.columnCount <= targetCol) {
-                                addColumnSilently("col${tableModel.columnCount + 1}")
-                            }
-                            
-                            if (targetRow < tableModel.rowCount && targetCol < tableModel.columnCount) {
-                                tableModel.setValueAt(cellValue.trim(), targetRow, targetCol)
-                            }
-                        }
-                    }
+            val (sr, sc) = table.selectedRow to table.selectedColumn
+            if (sr == -1 || sc == -1) return
+            
+            data.split("\n").forEachIndexed { ri, row ->
+                row.split("\t").forEachIndexed { ci, cell ->
+                    val tr = sr + ri
+                    val tc = sc + ci
+                    while (tableModel.rowCount <= tr) addRowSilently()
+                    while (tableModel.columnCount <= tc) addColumnSilently("col${tableModel.columnCount + 1}")
+                    tableModel.setValueAt(cell.trim(), tr, tc)
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }
     
     private fun deleteSelectedCells() {
-        val selectedRows = table.selectedRows
-        val selectedCols = table.selectedColumns
-        
-        for (row in selectedRows) {
-            for (col in selectedCols) {
-                if (row < tableModel.rowCount && col < tableModel.columnCount) {
-                    tableModel.setValueAt("", row, col)
+        table.selectedRows.forEach { r ->
+            table.selectedColumns.forEach { c ->
+                if (r < tableModel.rowCount && c < tableModel.columnCount) {
+                    tableModel.setValueAt("", r, c)
                 }
             }
         }
     }
     
     private fun addColumn() {
-        val columnName = JOptionPane.showInputDialog(
-            this,
-            "Enter column name:",
-            "Add Column",
-            JOptionPane.PLAIN_MESSAGE
-        )
-        
-        if (columnName != null && columnName.isNotBlank()) {
-            addColumnSilently(columnName)
-            scheduleDocumentUpdate()
-        }
+        JOptionPane.showInputDialog(this, "Enter column name:", "Add Column", JOptionPane.PLAIN_MESSAGE)
+            ?.takeIf { it.isNotBlank() }?.let {
+                addColumnSilently(it)
+                scheduleDocumentUpdate()
+            }
     }
     
-    private fun addColumnSilently(columnName: String) {
-        tableModel.addColumn(columnName)
-    }
+    private fun addColumnSilently(name: String) = tableModel.addColumn(name)
     
-    private fun addRow() {
-        addRowAt(tableModel.rowCount)
-    }
-    
-    private fun addRowAt(index: Int) {
-        val rowData = Array(tableModel.columnCount) { "" }
-        tableModel.insertRow(index, rowData)
+    private fun addRowAt(idx: Int) {
+        tableModel.insertRow(idx, Array(tableModel.columnCount) { "" })
         scheduleDocumentUpdate()
     }
     
-    private fun addRowSilently() {
-        val rowData = Array(tableModel.columnCount) { "" }
-        tableModel.addRow(rowData)
-    }
+    private fun addRowSilently() = tableModel.addRow(Array(tableModel.columnCount) { "" })
     
-    private fun removeColumn(columnIndex: Int) {
-        if (columnIndex < 0 || columnIndex >= tableModel.columnCount) return
+    private fun removeColumn(idx: Int) {
+        if (idx !in 0 until tableModel.columnCount) return
         
-        // Convert table model to remove column
-        val newModel = DefaultTableModel()
-        
-        // Add columns except the selected one
-        for (i in 0 until tableModel.columnCount) {
-            if (i != columnIndex) {
-                newModel.addColumn(tableModel.getColumnName(i))
+        tableModel = DefaultTableModel().apply {
+            (0 until tableModel.columnCount).filter { it != idx }.forEach { addColumn(tableModel.getColumnName(it)) }
+            (0 until tableModel.rowCount).forEach { r ->
+                addRow((0 until tableModel.columnCount).filter { it != idx }
+                    .map { tableModel.getValueAt(r, it) ?: "" }.toTypedArray())
             }
         }
-        
-        // Add rows with data except selected column
-        for (row in 0 until tableModel.rowCount) {
-            val rowData = mutableListOf<Any>()
-            for (col in 0 until tableModel.columnCount) {
-                if (col != columnIndex) {
-                    rowData.add(tableModel.getValueAt(row, col) ?: "")
-                }
-            }
-            newModel.addRow(rowData.toTypedArray())
-        }
-        
-        tableModel = newModel
         table.model = tableModel
-        
-        // Re-add listener after setting new model
-        tableModel.addTableModelListener {
-            scheduleDocumentUpdate()
-        }
-        
+        tableModel.addTableModelListener { scheduleDocumentUpdate() }
         scheduleDocumentUpdate()
     }
     
-    private fun removeRow(rowIndex: Int) {
-        if (rowIndex >= 0 && rowIndex < tableModel.rowCount) {
-            tableModel.removeRow(rowIndex)
+    private fun removeRow(idx: Int) {
+        if (idx in 0 until tableModel.rowCount) {
+            tableModel.removeRow(idx)
             scheduleDocumentUpdate()
         }
     }
     
-    /**
-     * Load table data from parsed Examples block
-     */
     fun loadTableData(data: ExamplesTableParser.TableData, examplesElement: PsiElement) {
         currentExamplesElement = examplesElement
         
-        // Clear existing model
-        tableModel = DefaultTableModel()
-        
-        // Add columns (headers)
-        data.headers.forEach { header ->
-            tableModel.addColumn(header)
-        }
-        
-        // Add rows
-        data.rows.forEach { row ->
-            // Pad row to match column count
-            val paddedRow = row.toMutableList()
-            while (paddedRow.size < data.headers.size) {
-                paddedRow.add("")
+        tableModel = DefaultTableModel().apply {
+            data.headers.forEach { addColumn(it) }
+            data.rows.forEach { row ->
+                addRow((row + List(maxOf(0, data.headers.size - row.size)) { "" }).toTypedArray())
             }
-            tableModel.addRow(paddedRow.toTypedArray())
-        }
-        
-        // If no data, create a default empty row
-        if (tableModel.rowCount == 0 && tableModel.columnCount > 0) {
-            addRowSilently()
-        }
-        
-        // If no columns, add a default column
-        if (tableModel.columnCount == 0) {
-            tableModel.addColumn("column1")
-            addRowSilently()
+            
+            if (rowCount == 0 && columnCount > 0) addRow(Array(columnCount) { "" })
+            if (columnCount == 0) {
+                addColumn("column1")
+                addRow(arrayOf(""))
+            }
         }
         
         table.model = tableModel
-        
-        // Re-add listener after setting new model
         tableModel.addTableModelListener {
             scheduleDocumentUpdate()
             updateRowHeader()
         }
-        
-        // Update row header
         updateRowHeader()
     }
     
-    /**
-     * Schedule a document update with debouncing to avoid excessive updates
-     */
     private fun scheduleDocumentUpdate() {
         updateTimer?.stop()
-        updateTimer = Timer(300) {
-            updateDocument()
+        updateTimer = Timer(300) { updateDocument() }.apply {
+            isRepeats = false
+            start()
         }
-        updateTimer?.isRepeats = false
-        updateTimer?.start()
     }
     
-    /**
-     * Update the document with current table data
-     */
     private fun updateDocument() {
-        val examplesElement = currentExamplesElement ?: return
-        
-        // Extract headers and rows from table model
-        val headers = mutableListOf<String>()
-        for (i in 0 until tableModel.columnCount) {
-            headers.add(tableModel.getColumnName(i))
-        }
-        
-        val rows = mutableListOf<List<String>>()
-        for (i in 0 until tableModel.rowCount) {
-            val row = mutableListOf<String>()
-            for (j in 0 until tableModel.columnCount) {
-                val value = tableModel.getValueAt(i, j)?.toString() ?: ""
-                row.add(value)
+        currentExamplesElement?.let { elem ->
+            val headers = (0 until tableModel.columnCount).map { tableModel.getColumnName(it) }
+            val rows = (0 until tableModel.rowCount).map { r ->
+                (0 until tableModel.columnCount).map { c -> tableModel.getValueAt(r, c)?.toString() ?: "" }
             }
-            rows.add(row)
+            ExamplesTableFormatter.updateTableInDocument(elem, headers, rows)
         }
-        
-        // Update the document
-        ExamplesTableFormatter.updateTableInDocument(examplesElement, headers, rows)
     }
 }
