@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.4.1.3"
+version = "1.4.2"
 
 repositories {
     mavenLocal()    
@@ -44,9 +44,9 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.4.1.3</h3>
+            <h3>Version 1.4.2</h3>
             <ul>
-              <li>Minor change: Change default runner setting</li>
+              <li>Major change: Allow editing Examples table with GUI</li>
             </ul>
         """.trimIndent()
     }

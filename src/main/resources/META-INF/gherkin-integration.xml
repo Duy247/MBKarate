@@ -33,6 +33,10 @@
             </targetElementPattern>
         </codeInsight.lineMarkerProvider>
         
+        <!-- Examples Table Editor Line Marker Provider - Spreadsheet editor for Examples tables -->
+        <codeInsight.lineMarkerProvider language="Gherkin"
+                                        implementationClass="com.mb.mbplugin.karate.examples.ExamplesTableEditorLineMarkerProvider"/>
+        
         <!-- Karate Feature Documentation Provider -->
         <lang.documentationProvider language="Gherkin"
                                    implementationClass="com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider"/>

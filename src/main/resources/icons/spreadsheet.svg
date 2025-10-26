@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Background -->
+  <rect x="2" y="2" width="12" height="12" fill="#43A047" rx="1"/>
+  
+  <!-- Grid lines - horizontal -->
+  <line x1="2" y1="6" x2="14" y2="6" stroke="#fff" stroke-width="0.5"/>
+  <line x1="2" y1="10" x2="14" y2="10" stroke="#fff" stroke-width="0.5"/>
+  
+  <!-- Grid lines - vertical -->
+  <line x1="6" y1="2" x2="6" y2="14" stroke="#fff" stroke-width="0.5"/>
+  <line x1="10" y1="2" x2="10" y2="14" stroke="#fff" stroke-width="0.5"/>
+  
+  <!-- Border -->
+  <rect x="2" y="2" width="12" height="12" fill="none" stroke="#2E7D32" stroke-width="1" rx="1"/>
+</svg>

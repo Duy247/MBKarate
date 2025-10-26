@@ -72,6 +72,12 @@
                     factoryClass="com.mb.mbplugin.karate.playbook.ShortPlaybookToolWindowFactory"
                     icon="AllIcons.Actions.ListFiles"/>
         
+        <!-- Examples Table Editor Tool Window -->
+        <toolWindow id="Examples Table Editor"
+                    anchor="right"
+                    factoryClass="com.mb.mbplugin.karate.examples.ExamplesTableEditorToolWindowFactory"
+                    icon="AllIcons.Actions.Properties"/>
+        
         <!-- Jira Integration Settings -->
         <projectConfigurable
                 groupId="tools"
