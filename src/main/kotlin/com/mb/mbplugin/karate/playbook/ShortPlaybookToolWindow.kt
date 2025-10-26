@@ -19,6 +19,7 @@ import com.intellij.ui.content.ContentFactory
 import com.intellij.util.ui.JBUI
 import org.jetbrains.plugins.cucumber.psi.GherkinFile
 import java.awt.BorderLayout
+import java.awt.FlowLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.*
@@ -111,9 +112,27 @@ class ShortPlaybookPanel(private val project: Project) : JPanel(BorderLayout()),
 
         // Add to panel with enhanced styling
         val topPanel = JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.empty(8, 8, 8, 8)
+            border = JBUI.Borders.empty(2, 2, 2, 2)
             background = java.awt.Color(250, 250, 250)
+            
+            // Add search field in center
             add(searchField, BorderLayout.CENTER)
+            
+            // Add refresh button on the right
+            val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 5, 0)).apply {
+                background = java.awt.Color(250, 250, 250)
+                
+                val refreshButton = JButton("Refresh").apply {
+                    font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 12)
+                    toolTipText = "Refresh playbook from all feature files"
+                    isFocusPainted = false
+                    addActionListener {
+                        refreshPlaybook()
+                    }
+                }
+                add(refreshButton)
+            }
+            add(buttonPanel, BorderLayout.EAST)
         }
 
         add(topPanel, BorderLayout.NORTH)
