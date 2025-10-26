@@ -42,28 +42,33 @@ object ExamplesTableFormatter {
         }
         
         // Build the formatted table
-        val sb = StringBuilder()
+        val lines = mutableListOf<String>()
         
         // Add header row
-        sb.append("      | ")
-        headers.forEachIndexed { index, header ->
-            sb.append(header.padEnd(columnWidths[index]))
-            sb.append(" | ")
+        val headerLine = buildString {
+            append("      | ")
+            headers.forEachIndexed { index, header ->
+                append(header.padEnd(columnWidths[index]))
+                append(" | ")
+            }
         }
-        sb.append("\n")
+        lines.add(headerLine)
         
         // Add data rows
         rows.forEach { row ->
-            sb.append("      | ")
-            row.forEachIndexed { index, cell ->
-                val width = if (index < columnWidths.size) columnWidths[index] else cell.length
-                sb.append(cell.padEnd(width))
-                sb.append(" | ")
+            val rowLine = buildString {
+                append("      | ")
+                row.forEachIndexed { index, cell ->
+                    val width = if (index < columnWidths.size) columnWidths[index] else cell.length
+                    append(cell.padEnd(width))
+                    append(" | ")
+                }
             }
-            sb.append("\n")
+            lines.add(rowLine)
         }
         
-        return sb.toString()
+        // Join with newlines but don't add trailing newline
+        return lines.joinToString("\n")
     }
     
     /**
@@ -137,12 +142,31 @@ object ExamplesTableFormatter {
      */
     private fun findTableEndOffset(examplesElement: PsiElement, document: Document): Int {
         var current: PsiElement? = examplesElement.nextSibling
+        var tableElement: GherkinTable? = null
         
         while (current != null) {
             if (current is GherkinTable) {
-                return current.textRange.endOffset
+                tableElement = current
+                break
             }
             current = current.nextSibling
+        }
+        
+        if (tableElement != null) {
+            var endOffset = tableElement.textRange.endOffset
+            
+            // Check if there's a single newline right after the table - include it
+            val nextSibling = tableElement.nextSibling
+            if (nextSibling is PsiWhiteSpace) {
+                val whitespaceText = nextSibling.text
+                // Only consume one newline if it exists
+                if (whitespaceText.startsWith("\n") || whitespaceText.startsWith("\r\n")) {
+                    val lineBreakLength = if (whitespaceText.startsWith("\r\n")) 2 else 1
+                    endOffset += lineBreakLength
+                }
+            }
+            
+            return endOffset
         }
         
         // If no table exists, return the same as start (will insert new table)
