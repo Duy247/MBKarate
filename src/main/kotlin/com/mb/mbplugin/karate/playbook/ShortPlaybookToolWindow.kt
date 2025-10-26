@@ -50,9 +50,16 @@ class ShortPlaybookPanel(private val project: Project) : JPanel(BorderLayout()),
     private var refreshScheduled = false
 
     init {
-        // Create search field
+        // Create search field with enhanced styling
         searchField = SearchTextField(true).apply {
-            textEditor.emptyText.text = "Search playbook..."
+            textEditor.apply {
+                emptyText.text = "Search playbook..."
+                font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 13)
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(java.awt.Color(180, 180, 180)),
+                    BorderFactory.createEmptyBorder(6, 8, 6, 8)
+                )
+            }
         }
         
         // Add search listener for immediate feedback
@@ -62,8 +69,12 @@ class ShortPlaybookPanel(private val project: Project) : JPanel(BorderLayout()),
             override fun changedUpdate(e: javax.swing.event.DocumentEvent?) = filterEntries()
         })
 
-        // Create list
+        // Create list with enhanced styling
         list = JBList(listModel).apply {
+            font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 13)
+            fixedCellHeight = 28
+            border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
+            
             cellRenderer = object : ColoredListCellRenderer<ShortPlaybookEntry>() {
                 override fun customizeCellRenderer(
                     list: JList<out ShortPlaybookEntry>,
@@ -73,9 +84,17 @@ class ShortPlaybookPanel(private val project: Project) : JPanel(BorderLayout()),
                     hasFocus: Boolean
                 ) {
                     value?.let {
-                        append(it.shortDescription)
+                        ipad = JBUI.insets(4, 8)
+                        
+                        append(it.shortDescription, com.intellij.ui.SimpleTextAttributes(
+                            com.intellij.ui.SimpleTextAttributes.STYLE_BOLD,
+                            if (selected) null else java.awt.Color(180, 180, 180)
+                        ))
                         append(" ")
-                        append("(@${it.scenarioTag})", com.intellij.ui.SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        append("(@${it.scenarioTag})", com.intellij.ui.SimpleTextAttributes(
+                            com.intellij.ui.SimpleTextAttributes.STYLE_PLAIN,
+                            if (selected) null else java.awt.Color(100, 100, 100)
+                        ))
                     }
                 }
             }
@@ -90,14 +109,17 @@ class ShortPlaybookPanel(private val project: Project) : JPanel(BorderLayout()),
             }
         })
 
-        // Add to panel
+        // Add to panel with enhanced styling
         val topPanel = JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.empty(5)
+            border = JBUI.Borders.empty(8, 8, 8, 8)
+            background = java.awt.Color(250, 250, 250)
             add(searchField, BorderLayout.CENTER)
         }
 
         add(topPanel, BorderLayout.NORTH)
-        add(JBScrollPane(list), BorderLayout.CENTER)
+        add(JBScrollPane(list).apply {
+            border = BorderFactory.createEmptyBorder()
+        }, BorderLayout.CENTER)
 
         // Initial scan
         refreshPlaybook()

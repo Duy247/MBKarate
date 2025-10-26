@@ -20,6 +20,25 @@ class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayo
         fillsViewportHeight = true
         dragEnabled = true
         dropMode = DropMode.INSERT_ROWS
+        rowHeight = 24
+        font = Font("JetBrains Mono", Font.PLAIN, 13)
+        gridColor = Color(220, 220, 220)
+        setShowGrid(true)
+        setSelectionMode(ListSelectionModel.SINGLE_INTERVAL_SELECTION)
+        
+        // Better cell renderer with padding
+        setDefaultRenderer(Any::class.java, object : DefaultTableCellRenderer() {
+            override fun getTableCellRendererComponent(
+                table: JTable, value: Any?, isSelected: Boolean,
+                hasFocus: Boolean, row: Int, column: Int
+            ): Component {
+                val c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+                if (c is JLabel) {
+                    c.border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
+                }
+                return c
+            }
+        })
     }
     private var currentExamplesElement: PsiElement? = null
     private var updateTimer: Timer? = null
@@ -48,25 +67,62 @@ class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayo
     }
     
     private fun createCustomTableHeader() = object : JTableHeader(table.columnModel) {
+        init {
+            // Style the header
+            background = Color(250, 250, 250)
+            foreground = Color(60, 60, 60)
+            font = Font("JetBrains Mono", Font.BOLD, 13)
+            preferredSize = Dimension(preferredSize.width, 32)
+            
+            // Custom renderer for header cells with better styling
+            defaultRenderer = object : DefaultTableCellRenderer() {
+                override fun getTableCellRendererComponent(
+                    table: JTable, value: Any?, isSelected: Boolean,
+                    hasFocus: Boolean, row: Int, column: Int
+                ): Component {
+                    val c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+                    if (c is JLabel) {
+                        c.horizontalAlignment = CENTER
+                        c.background = Color(245, 245, 245)
+                        c.foreground = Color(60, 60, 60)
+                        c.font = Font("JetBrains Mono", Font.BOLD, 13)
+                        c.border = BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 0, 2, 1, Color(200, 200, 200)),
+                            BorderFactory.createEmptyBorder(6, 8, 6, 8)
+                        )
+                    }
+                    return c
+                }
+            }
+        }
+        
         override fun paintComponent(g: Graphics) {
             super.paintComponent(g)
             (g as Graphics2D).apply {
-                color = Color(100, 150, 255)
-                val x = width - 30
-                val y = (height - 20) / 2
-                fillRect(x, y, 20, 20)
+                setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                
+                // Draw + button with better styling
+                color = Color(76, 175, 80)
+                val x = width - 28
+                val y = (height - 22) / 2
+                fillRoundRect(x, y, 22, 22, 4, 4)
+                
+                // Draw + symbol
                 color = Color.WHITE
-                drawString("+", x + 6, y + 15)
+                stroke = BasicStroke(2f)
+                drawLine(x + 11, y + 6, x + 11, y + 16)
+                drawLine(x + 6, y + 11, x + 16, y + 11)
             }
         }
     }.apply {
         addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
-                val x = width - 30
-                val y = (height - 20) / 2
-                if (e.x in x..(x + 20) && e.y in y..(y + 20)) addColumn()
+                val x = width - 28
+                val y = (height - 22) / 2
+                if (e.x in x..(x + 22) && e.y in y..(y + 22)) addColumn()
             }
         })
+        cursor = Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR)
     }
     
     private fun setupRowHeaderColumn(scrollPane: JBScrollPane) {
@@ -81,19 +137,35 @@ class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayo
                     isSelected: Boolean, hasFocus: Boolean, row: Int, col: Int) =
                     (super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, col) as JLabel).apply {
                         horizontalAlignment = CENTER
-                        background = Color(240, 240, 240)
-                        foreground = Color(100, 150, 255)
-                        font = Font(font.name, Font.BOLD, 14)
-                        border = BorderFactory.createLineBorder(Color(200, 200, 200))
+                        verticalAlignment = CENTER
+                        background = Color(248, 248, 248)
+                        foreground = Color(76, 175, 80)
+                        font = Font("JetBrains Mono", Font.BOLD, 16)
+                        border = BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 0, 1, 1, Color(220, 220, 220)),
+                            BorderFactory.createEmptyBorder(2, 4, 2, 4)
+                        )
                     }
             })
-            preferredScrollableViewportSize = Dimension(25, 0)
+            preferredScrollableViewportSize = Dimension(30, 0)
             setShowGrid(false)
-            columnModel.getColumn(0).apply { preferredWidth = 25; maxWidth = 25; minWidth = 25 }
+            columnModel.getColumn(0).apply { 
+                preferredWidth = 30
+                maxWidth = 30
+                minWidth = 30
+            }
             intercellSpacing = Dimension(0, 0)
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
                     rowAtPoint(e.point).takeIf { it >= 0 }?.let { addRowAt(it + 1) }
+                }
+                
+                override fun mouseEntered(e: MouseEvent) {
+                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                }
+                
+                override fun mouseExited(e: MouseEvent) {
+                    cursor = Cursor.getDefaultCursor()
                 }
             })
         }

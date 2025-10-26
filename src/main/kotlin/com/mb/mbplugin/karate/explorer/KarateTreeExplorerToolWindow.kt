@@ -56,13 +56,22 @@ class KarateTreeExplorerPanel(private val project: Project) : JPanel(BorderLayou
     private val shortToggle: JCheckBox
 
     init {
-        // Create the tree
-        tree = Tree(DefaultTreeModel(DefaultMutableTreeNode("No file selected")))
+        // Create the tree with enhanced styling
+        tree = Tree(DefaultTreeModel(DefaultMutableTreeNode("No file selected"))).apply {
+            font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 13)
+            rowHeight = 26
+            border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
+        }
         tree.isRootVisible = true
         tree.showsRootHandles = true
 
-        // Custom cell renderer for icons
+        // Custom cell renderer for icons with better styling
         tree.cellRenderer = object : DefaultTreeCellRenderer() {
+            init {
+                // Enhanced padding for tree cells
+                border = BorderFactory.createEmptyBorder(3, 4, 3, 4)
+            }
+            
             override fun getTreeCellRendererComponent(
                 tree: javax.swing.JTree?,
                 value: Any?,
@@ -82,6 +91,9 @@ class KarateTreeExplorerPanel(private val project: Project) : JPanel(BorderLayou
                         }
                     }
                 }
+                
+                // Set font for better readability
+                font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 13)
                 
                 return component
             }
@@ -124,19 +136,29 @@ class KarateTreeExplorerPanel(private val project: Project) : JPanel(BorderLayou
             }
         }
 
-        // Add to panel
-        val scrollPane = JBScrollPane(tree)
+        // Add to panel with enhanced styling
+        val scrollPane = JBScrollPane(tree).apply {
+            border = BorderFactory.createEmptyBorder()
+        }
         add(scrollPane, BorderLayout.CENTER)
 
-        // Create top panel with info label and toggle
+        // Create top panel with info label and toggle with better styling
         val topPanel = JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.empty(5)
+            border = JBUI.Borders.empty(8, 8, 8, 8)
+            background = java.awt.Color(250, 250, 250)
             
-            val infoLabel = JLabel("Right-click in a feature file and select 'Karate Tree Explorer' to view its structure")
+            val infoLabel = JLabel("Right-click in a feature file and select 'Karate Tree Explorer' to view its structure").apply {
+                font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 12)
+                foreground = java.awt.Color(80, 80, 80)
+            }
             add(infoLabel, BorderLayout.CENTER)
             
-            val controlPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 5, 0))
-            controlPanel.add(shortToggle)
+            val controlPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 5, 0)).apply {
+                background = java.awt.Color(250, 250, 250)
+            }
+            controlPanel.add(shortToggle.apply {
+                font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 12)
+            })
             add(controlPanel, BorderLayout.EAST)
         }
         

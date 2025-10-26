@@ -18,9 +18,12 @@
                <ul>
                     <li>Go to Definition for call read</li>
                     <li>Indexing and Autocomplete for call read (file and scenario tags)</li>
-                    <li>Documentation View</li>
+                    <li>Documentation View with param, return, snippet, short syntax</li>
+                    <li>Error check for missing param in call read, and wrong file path</li>
                     <li>Jira Issue Integration with gutter icons</li>
                     <li>Custom Test Execution</li>
+                    <li>cURL import</li>
+                    <li>Edit Examples table with GUI</li>
                </ul>
           <br><br>
           This plugin utilizes the standard Gherkin/Cucumber plugins for syntax highlighting and formatting,
