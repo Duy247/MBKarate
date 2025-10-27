@@ -63,6 +63,7 @@ class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayo
         tableModel.addTableModelListener {
             scheduleDocumentUpdate()
             updateRowHeader()
+            adjustColumnWidths()
         }
     }
     
@@ -189,6 +190,38 @@ class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayo
         }
     }
     
+    private fun adjustColumnWidths() {
+        val fontMetrics = table.getFontMetrics(table.font)
+        val headerFontMetrics = table.tableHeader.getFontMetrics(table.tableHeader.font)
+        
+        for (col in 0 until table.columnCount) {
+            var maxWidth = 0
+            
+            // Check header width
+            val headerValue = table.columnModel.getColumn(col).headerValue?.toString() ?: ""
+            val headerWidth = headerFontMetrics.stringWidth(headerValue) + 40 // Add padding for borders and "+" button space
+            maxWidth = maxOf(maxWidth, headerWidth)
+            
+            // Check all cell widths in this column
+            for (row in 0 until table.rowCount) {
+                val cellValue = table.getValueAt(row, col)?.toString() ?: ""
+                val cellWidth = fontMetrics.stringWidth(cellValue) + 32 // Add padding (16px on each side)
+                maxWidth = maxOf(maxWidth, cellWidth)
+            }
+            
+            // Set minimum and maximum bounds
+            val finalWidth = maxWidth.coerceIn(80, 400)
+            
+            table.columnModel.getColumn(col).apply {
+                preferredWidth = finalWidth
+                width = finalWidth
+            }
+        }
+        
+        table.revalidate()
+        table.repaint()
+    }
+    
     private fun setupRowDragAndDrop() {
         table.transferHandler = object : TransferHandler() {
             private var draggedRow = -1
@@ -308,6 +341,7 @@ class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayo
             scheduleDocumentUpdate()
             updateRowHeader()
         }
+        adjustColumnWidths()
     }
     
     private fun renameColumn(idx: Int) {
@@ -435,6 +469,7 @@ class ExamplesTableEditorPanel(private val project: Project) : JPanel(BorderLayo
             updateRowHeader()
         }
         updateRowHeader()
+        adjustColumnWidths()
     }
     
     private fun scheduleDocumentUpdate() {
