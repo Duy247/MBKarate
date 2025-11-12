@@ -3,7 +3,10 @@ package com.mb.mbplugin.settings
 import com.intellij.openapi.components.*
 import com.intellij.openapi.project.Project
 
-@State(name = "KarateTestRunnerSettings", storages = [Storage("karateTestRunnerSettings.xml")])
+@State(
+    name = "KarateTestRunnerSettings",
+    storages = [Storage(StoragePathMacros.WORKSPACE_FILE)]
+)
 @Service(Service.Level.PROJECT)
 class KarateTestRunnerSettings : PersistentStateComponent<KarateTestRunnerSettings.State> {
 

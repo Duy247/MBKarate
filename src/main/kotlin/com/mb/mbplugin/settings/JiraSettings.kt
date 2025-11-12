@@ -6,7 +6,7 @@ import com.intellij.openapi.project.Project
 @Service(Service.Level.PROJECT)
 @State(
     name = "JiraSettings",
-    storages = [Storage("jiraSettings.xml")]
+    storages = [Storage(StoragePathMacros.WORKSPACE_FILE)]
 )
 class JiraSettings : PersistentStateComponent<JiraSettings.State> {
     

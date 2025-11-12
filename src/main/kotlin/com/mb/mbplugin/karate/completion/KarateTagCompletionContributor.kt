@@ -113,6 +113,11 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                         .withPresentableText(short)
                         .withTypeText("${vf.nameWithoutExtension}.feature@$scenarioTag", true)
                         .withTailText(" ($normPath)", true)
+                        // Add lookup variants to improve tokenization/case-insensitive matching
+                        .withLookupString(short)
+                        .withLookupString(short.lowercase())
+                        .withLookupString(short.uppercase())
+                        .withLookupString("&$short")
                         .withInsertHandler { ctx, _ -> insertWithIndent(ctx, trigger.index, fullSuggestion, '&') }
                 )
             }
@@ -143,7 +148,10 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         
         result.addElement(
             LookupElementBuilder.create(fileName)
-                .withPresentableText(suggestion)
+                .withPresentableText(fileName)
+                .withLookupString(fileName)
+                .withLookupString(fileName.lowercase())
+                .withLookupString(fileName.uppercase())
                 .withTypeText("$fileName.feature")
                 .withTailText(" ($normPath)", true)
                 .withInsertHandler { ctx, _ -> 
@@ -158,21 +166,35 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         val vFile = findVirtualFile(tagData.absolutePath) ?: return
         val psiFile = PsiManager.getInstance(project).findFile(vFile) as? KarateFile ?: return
         
-        val (snippetBefore, snippetAfter, paramInputs) = extractDocInfo(psiFile, tagData.tag, docProvider)
+        val docInfo = extractDocInfoWithShort(psiFile, tagData.tag, docProvider)
         
-        val paramBlock = if (paramInputs.isNotEmpty()) {
-            paramInputs.joinToString(", ", prefix = " { ", postfix = " }") { "$it: ''" }
+        val paramBlock = if (docInfo.paramInputs.isNotEmpty()) {
+            docInfo.paramInputs.joinToString(", ", prefix = " { ", postfix = " }") { "$it: ''" }
         } else ""
         
         val callLine = "* call read('classpath:$normPath@${tagData.tag}')$paramBlock"
-        val fullSuggestion = buildSuggestion(snippetBefore, callLine, snippetAfter)
+        val fullSuggestion = buildSuggestion(docInfo.snippetBefore, callLine, docInfo.snippetAfter)
         
         val fileName = File(tagData.absolutePath).nameWithoutExtension
         
+        // Build presentation text: {file_name} | {tag} | {@short}
+        val presentableText = buildString {
+            append("@" + tagData.tag)
+            if (docInfo.shortDescription != null) {
+                append(" | ")
+                append(docInfo.shortDescription)
+            }
+        }
+        
         result.addElement(
             LookupElementBuilder.create("!${tagData.tag}__${fileName}__${System.nanoTime()}")
-                .withPresentableText("* call read('classpath:$normPath@${tagData.tag}')")
+                .withPresentableText(presentableText)
                 .withLookupString("!${tagData.tag}")
+                // also allow matching by tag name (case variants) and file name
+                .withLookupString(tagData.tag)
+                .withLookupString(tagData.tag.lowercase())
+                .withLookupString(tagData.tag.uppercase())
+                .withLookupString(fileName)
                 .withTypeText("$fileName.feature")
                 .withTailText(" ($normPath)", true)
                 .withInsertHandler { ctx, _ -> 
@@ -194,6 +216,27 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         
         return Triple(parsed.snippetBefore, parsed.snippetAfter, paramInputs)
     }
+    
+    private fun extractDocInfoWithShort(psiFile: KarateFile, tag: String, 
+                                       docProvider: KarateFeatureDocumentationProvider): ExtractedDocInfo {
+        val docText = docProvider.extractDocumentationFromFile(psiFile, tag)
+        if (docText.isNullOrBlank()) return ExtractedDocInfo(null, null, emptyList(), null)
+        
+        val parsed = docProvider.parseDocDirectives(docText)
+        val paramInputs = parsed.params.filter { param ->
+            val tagsLower = param.tags.map { it.lowercase() }
+            "input" in tagsLower && "required" in tagsLower
+        }.map { it.name }
+        
+        return ExtractedDocInfo(parsed.snippetBefore, parsed.snippetAfter, paramInputs, parsed.shortDescription)
+    }
+    
+    data class ExtractedDocInfo(
+        val snippetBefore: String?,
+        val snippetAfter: String?,
+        val paramInputs: List<String>,
+        val shortDescription: String?
+    )
     
     private fun buildSuggestion(before: String?, main: String, after: String?): String = buildString {
         before?.trim()?.takeIf { it.isNotBlank() }?.let {

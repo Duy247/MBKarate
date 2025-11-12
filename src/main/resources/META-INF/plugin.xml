@@ -123,5 +123,13 @@
             description="Show the Karate feature tree structure with call read navigation">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        
+        <!-- Document Helper Action -->
+        <action id="com.mb.mbplugin.karate.actions.DocumentHelperAction"
+            class="com.mb.mbplugin.karate.actions.DocumentHelperAction"
+            text="Document Helper"
+            description="Quickly create documentation for Karate scenarios">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>
