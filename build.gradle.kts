@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.4.2.2"
+version = "1.4.3"
 
 repositories {
     mavenLocal()    
@@ -44,9 +44,10 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.4.2.2</h3>
+            <h3>Version 1.4.3</h3>
             <ul>
-              <li>Minor change: add adaptive width for Examples Table Editor</li>
+              <li>Minor change: change the way suggested feature appear</li>
+              <li>Major change: add document helper function</li>
             </ul>
         """.trimIndent()
     }
