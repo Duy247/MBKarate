@@ -29,12 +29,11 @@ package {{PACKAGE_NAME}};
 
 import com.intuit.karate.junit5.Karate;
 
-class {{CLASS_NAME}} {
+public class {{CLASS_NAME}} {
     @Karate.Test
-    Karate testMockApi() {
+    Karate testAll() {
         return Karate.run("classpath:{{FILE_PATH}}")
                 .tags("{{TAG_TEXT}}")
-                .karateEnv("local")
                 .relativeTo(getClass());
     }
 }

@@ -15,7 +15,7 @@ class KarateCallReadAnnotator : Annotator {
     }
 
     private val CALL_READ_PATTERN = Pattern.compile(
-        "call\\s+read\\s*\\(\\s*['\"]classpath:([^'\"]+\\.feature)(@\\w+)?['\"]\\s*\\)(\\s*\\{([^}]*)\\})?",
+        "['\"]classpath:([^'\"]+\\.feature)(@\\w+)?['\"](?:\\s*\\))?(?:\\s*\\{([^}]*)\\})?",
         Pattern.CASE_INSENSITIVE
     )
 
@@ -27,7 +27,7 @@ class KarateCallReadAnnotator : Annotator {
         processedElements.add(start)
 
         val textFragment = element.text
-        if (!textFragment.contains("call read(")) return
+        if (!textFragment.contains("classpath:") || !textFragment.contains(".feature")) return
 
         // Combine nearby fragments to reconstruct full line text
         val combinedText = buildString {
@@ -43,7 +43,7 @@ class KarateCallReadAnnotator : Annotator {
 
         val featurePath = matcher.group(1)
         val scenarioTag = matcher.group(2)?.substring(1)
-        val paramsBlock = matcher.group(4) // contents inside { ... }
+        val paramsBlock = matcher.group(3) // contents inside { ... }
 
         if (featurePath.isNullOrBlank() || scenarioTag.isNullOrBlank() || paramsBlock == null) return
 

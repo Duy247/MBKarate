@@ -121,5 +121,5 @@ class CurlToKarateConverter {
     private fun escapeValue(value: String): String = value.replace("'", "\\'")
 
     private fun truncate(value: String): String =
-        if (value.length > 30) value.take(30) + "..." else value
+        if (value.length > 1000) value.take(1000) + "..." else value
 }
