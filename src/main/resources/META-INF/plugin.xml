@@ -56,8 +56,9 @@
     <extensions defaultExtensionNs="com.intellij">
         <!-- Core functionality that doesn't depend on Gherkin -->
         
-        <!-- Go To Declaration Handler -->
+        <!-- Go To Declaration Handler - Order first to handle file paths before Gherkin step definitions -->
         <gotoDeclarationHandler
+                order="first"
                 implementation="com.mb.mbplugin.karate.navigation.KarateGoToSymbolProvider"/>
         
         <!-- Feature File Index -->

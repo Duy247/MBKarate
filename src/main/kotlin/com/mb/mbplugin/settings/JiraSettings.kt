@@ -11,8 +11,8 @@ import com.intellij.openapi.project.Project
 class JiraSettings : PersistentStateComponent<JiraSettings.State> {
     
     data class State(
-        var jiraBaseUrl: String = "",
-        var jiraProjectPatterns: String = "MBA-*"
+        var jiraBaseUrl: String = "https://jira.mbbank.com.vn/",
+        var jiraProjectPatterns: String = "MBA-*,BIZ-*,MS-*"
     )
     
     private var myState = State()
