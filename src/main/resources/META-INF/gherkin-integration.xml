@@ -17,6 +17,10 @@
         <completion.contributor language="Gherkin"
                                implementationClass="com.mb.mbplugin.karate.completion.KarateTagCompletionContributor"/>
         
+        <!-- Variable Completion Contributor -->
+        <completion.contributor language="Gherkin"
+                               implementationClass="com.mb.mbplugin.karate.completion.KarateVariableCompletionContributor"/>
+        
         <!-- Jira Issue Line Marker Provider - Specifically for GherkinTag elements -->
         <codeInsight.lineMarkerProvider language="Gherkin"
                                         implementationClass="com.mb.mbplugin.jira.JiraIssueLineMarkerProvider">

@@ -94,6 +94,14 @@
                 displayName="Karate Test Runner"
                 id="com.mb.mbplugin.settings.KarateTestRunnerSettingsConfigurable"
                 implementation="com.mb.mbplugin.settings.KarateTestRunnerSettingsConfigurable"/>
+        
+        <!-- Variable Suggestion Patterns Settings -->
+        <projectConfigurable
+                groupId="tools"
+                displayName="Variable Suggestion Patterns"
+                id="com.mb.mbplugin.settings.KarateVariableSuggestionSettingsConfigurable"
+                implementation="com.mb.mbplugin.settings.KarateVariableSuggestionSettingsConfigurable"/>
+        
         <!-- Jira Issue Intention Actions -->
         <intentionAction>
             <category>Jira Integration</category>
@@ -129,6 +137,14 @@
             class="com.mb.mbplugin.karate.actions.DocumentHelperAction"
             text="Document Helper"
             description="Quickly create documentation for Karate scenarios">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        
+        <!-- Toggle Variable Suggestion Action -->
+        <action id="com.mb.mbplugin.karate.actions.ToggleVariableSuggestionAction"
+            class="com.mb.mbplugin.karate.actions.ToggleVariableSuggestionAction"
+            text="Enable Variable Suggestion"
+            description="Toggle variable name autocomplete from def statements and call reads">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
     </actions>
