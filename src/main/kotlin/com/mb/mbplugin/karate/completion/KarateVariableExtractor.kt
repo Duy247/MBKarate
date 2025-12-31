@@ -1,9 +1,9 @@
 package com.mb.mbplugin.karate.completion
 
+import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.PsiTreeUtil
-import com.mb.mbplugin.karate.explorer.KarateTreeParser
 import com.mb.mbplugin.settings.KarateVariableSuggestionSettings
 import org.jetbrains.plugins.cucumber.psi.GherkinFile
 import org.jetbrains.plugins.cucumber.psi.GherkinScenario
@@ -13,16 +13,17 @@ import java.util.regex.Pattern
 
 /**
  * Service for extracting variable definitions from Karate feature files
- * Handles def statements and traverses call read chains to find all available variables
+ * Scans all feature files for def statements regardless of relationships
  */
+@Service(Service.Level.PROJECT)
 class KarateVariableExtractor(private val project: Project) {
 
-    private val parser = KarateTreeParser(project)
-    
-    companion object {
-        // Maximum depth to prevent infinite recursion
-        private const val MAX_DEPTH = 10
-    }
+    private data class CachedFile(
+        val stamp: Long,
+        val variables: Set<VariableInfo>
+    )
+
+    private val cacheByPath = mutableMapOf<String, CachedFile>()
     
     /**
      * Get compiled patterns from settings
@@ -46,114 +47,49 @@ class KarateVariableExtractor(private val project: Project) {
 
     /**
      * Extract all variable definitions available at a given position in a scenario
-     * This includes variables from:
-     * - Background (if present)
-     * - The scenario itself (up to the given step)
-     * - All call read statements (recursively)
-     * - Variables from calling scenarios (reverse lookup)
+     * This includes variables from all feature files, regardless of relationships
      */
+    @Suppress("UNUSED_PARAMETER")
     fun extractVariablesForScenario(
         scenario: PsiElement,
         currentStepOffset: Int
     ): Set<VariableInfo> {
         val variables = mutableSetOf<VariableInfo>()
-        val visitedFiles = mutableSetOf<String>()
-        
-        // Get the containing file
-        val featureFile = scenario.containingFile as? GherkinFile ?: return emptySet()
-        val currentFileName = featureFile.name
-        
-        // Get the current scenario tag
-        val currentScenarioTag = extractScenarioTag(scenario)
-        
-        // First, try to find calling scenarios (reverse lookup)
-        findCallingScenarios(featureFile, currentScenarioTag, variables, visitedFiles)
-        
-        // Then collect variables from Background
-        val background = PsiTreeUtil.findChildrenOfType(featureFile, GherkinScenario::class.java)
-            .firstOrNull { it.firstChild?.text?.trim()?.lowercase()?.startsWith("background") == true }
-        
-        if (background != null) {
-            collectVariablesFromScenario(background, Int.MAX_VALUE, variables, visitedFiles, 0, currentFileName, "Background")
-        }
-        
-        // Then collect from the current scenario (up to current step)
-        collectVariablesFromScenario(scenario, currentStepOffset, variables, visitedFiles, 0, currentFileName, currentScenarioTag)
-        
-        return variables
-    }
-    
-    /**
-     * Find scenarios in other files that call this scenario
-     * and collect variables defined before the call read statement
-     */
-    private fun findCallingScenarios(
-        targetFile: GherkinFile,
-        targetScenarioTag: String?,
-        variables: MutableSet<VariableInfo>,
-        visitedFiles: MutableSet<String>
-    ) {
-        val projectBasePath = project.basePath ?: return
-        val targetFileName = targetFile.name
-        val targetPath = targetFile.virtualFile?.path ?: return
-        
-        // Search for call read statements that reference this file/scenario
+
+        val settings = KarateVariableSuggestionSettings.getInstance(project)
+        if (!settings.isEnabled) return emptySet()
+
         val allFeatureFiles = com.intellij.psi.search.FileTypeIndex.getFiles(
             org.jetbrains.plugins.cucumber.psi.GherkinFileType.INSTANCE,
             com.intellij.psi.search.GlobalSearchScope.projectScope(project)
         )
-        
+
+        val seenPaths = mutableSetOf<String>()
         for (vFile in allFeatureFiles) {
-            if (vFile.path == targetPath) continue // Skip the current file
-            
             val psiFile = com.intellij.psi.PsiManager.getInstance(project).findFile(vFile) as? GherkinFile ?: continue
-            val fileText = psiFile.text
-            
-            // Check if this file calls our target
-            val callPattern = if (targetScenarioTag != null) {
-                Pattern.compile("call\\s+read\\s*\\([^)]*${Pattern.quote(targetFileName)}[^)]*@${Pattern.quote(targetScenarioTag)}[^)]*\\)", Pattern.CASE_INSENSITIVE)
-            } else {
-                Pattern.compile("call\\s+read\\s*\\([^)]*${Pattern.quote(targetFileName)}[^)]*\\)", Pattern.CASE_INSENSITIVE)
-            }
-            
-            if (!callPattern.matcher(fileText).find()) continue
-            
-            // Found a calling file - collect variables from scenarios that call us
-            val scenarios = PsiTreeUtil.findChildrenOfType(psiFile, GherkinScenario::class.java).toList() +
-                           PsiTreeUtil.findChildrenOfType(psiFile, GherkinScenarioOutline::class.java).toList()
-            
-            for (callingScenario in scenarios) {
-                // Check if this scenario has the call read
-                val steps = PsiTreeUtil.findChildrenOfType(callingScenario, GherkinStep::class.java)
-                var foundCallRead = false
-                var callReadOffset = -1
-                
-                for (step in steps) {
-                    if (callPattern.matcher(step.text ?: "").find()) {
-                        foundCallRead = true
-                        callReadOffset = step.textOffset
-                        break
-                    }
-                }
-                
-                if (foundCallRead) {
-                    // Collect variables from this calling scenario up to the call read point
-                    val callingFileName = psiFile.name
-                    val callingScenarioTag = extractScenarioTag(callingScenario)
-                    
-                    // Add background variables from calling file
-                    val callingBackground = PsiTreeUtil.findChildrenOfType(psiFile, GherkinScenario::class.java)
-                        .firstOrNull { it.firstChild?.text?.trim()?.lowercase()?.startsWith("background") == true }
-                    
-                    if (callingBackground != null) {
-                        collectVariablesFromScenario(callingBackground, Int.MAX_VALUE, variables, visitedFiles, 0, callingFileName, "Background")
-                    }
-                    
-                    // Collect variables up to the call read point
-                    collectVariablesFromScenario(callingScenario, callReadOffset, variables, visitedFiles, 0, callingFileName, callingScenarioTag)
-                }
+            val filePath = vFile.path
+            seenPaths.add(filePath)
+
+            val fileStamp = psiFile.modificationStamp
+            val cached = cacheByPath[filePath]
+            if (cached == null || cached.stamp != fileStamp) {
+                val extracted = extractVariablesFromFile(psiFile)
+                cacheByPath[filePath] = CachedFile(fileStamp, extracted)
             }
         }
+
+        if (cacheByPath.isNotEmpty()) {
+            val removed = cacheByPath.keys - seenPaths
+            for (path in removed) {
+                cacheByPath.remove(path)
+            }
+        }
+
+        for (cached in cacheByPath.values) {
+            variables.addAll(cached.variables)
+        }
+
+        return variables
     }
     
     private fun extractScenarioTag(scenario: PsiElement): String? {
@@ -171,19 +107,14 @@ class KarateVariableExtractor(private val project: Project) {
     }
 
     /**
-     * Collect variables from a scenario, including all nested call reads
+     * Collect def variables from a scenario
      */
-    private fun collectVariablesFromScenario(
+    private fun collectDefVariablesFromScenario(
         scenario: PsiElement,
-        stopOffset: Int,
         variables: MutableSet<VariableInfo>,
-        visitedFiles: MutableSet<String>,
-        depth: Int,
         fileName: String,
         scenarioTag: String?
     ) {
-        if (depth > MAX_DEPTH) return
-        
         val steps = when (scenario) {
             is GherkinScenario -> PsiTreeUtil.findChildrenOfType(scenario, GherkinStep::class.java)
             is GherkinScenarioOutline -> PsiTreeUtil.findChildrenOfType(scenario, GherkinStep::class.java)
@@ -191,19 +122,10 @@ class KarateVariableExtractor(private val project: Project) {
         }
         
         for (step in steps) {
-            // Stop if we've passed the current cursor position
-            if (step.textOffset > stopOffset) break
-            
             val stepText = step.text ?: continue
             
             // Extract def statements from this step
             extractDefStatements(stepText, variables, fileName, scenarioTag)
-            
-            // Extract and resolve call reads
-            val callReads = extractCallReadsFromStep(stepText, step)
-            for (callRead in callReads) {
-                resolveAndCollectVariables(callRead, variables, visitedFiles, depth + 1)
-            }
         }
     }
 
@@ -254,94 +176,6 @@ class KarateVariableExtractor(private val project: Project) {
     }
 
     /**
-     * Extract call read statements from a step
-     */
-    private fun extractCallReadsFromStep(
-        stepText: String,
-        stepElement: PsiElement
-    ): List<KarateTreeParser.CallReadInfo> {
-        val callReads = mutableListOf<KarateTreeParser.CallReadInfo>()
-        val callReadPattern = Pattern.compile(
-            "call\\s+read\\s*\\(\\s*['\"](?:classpath:|src/)?([^'\"]+\\.feature)(?:@(\\w+))?['\"]",
-            Pattern.CASE_INSENSITIVE
-        )
-        val matcher = callReadPattern.matcher(stepText)
-
-        while (matcher.find()) {
-            val featurePath = matcher.group(1)
-            val scenarioTag = matcher.group(2)
-
-            callReads.add(
-                KarateTreeParser.CallReadInfo(
-                    featurePath = featurePath,
-                    scenarioTag = scenarioTag,
-                    psiElement = stepElement,
-                    fullCallText = matcher.group()
-                )
-            )
-        }
-
-        return callReads
-    }
-
-    /**
-     * Resolve a call read and collect variables from the referenced file/scenario
-     */
-    private fun resolveAndCollectVariables(
-        callRead: KarateTreeParser.CallReadInfo,
-        variables: MutableSet<VariableInfo>,
-        visitedFiles: MutableSet<String>,
-        depth: Int
-    ) {
-        if (depth > MAX_DEPTH) return
-        
-        // Create a unique key to detect cycles
-        val fileKey = "${callRead.featurePath}@${callRead.scenarioTag ?: ""}"
-        if (visitedFiles.contains(fileKey)) return
-        visitedFiles.add(fileKey)
-        
-        // Resolve the call read using the parser
-        val resolved = parser.resolveCallRead(callRead) ?: return
-        
-        val fileName = resolved.psiFile.name
-        
-        // First, process Background if it exists (not already included in resolved.scenarios when calling specific scenario)
-        val background = resolved.allScenarios.firstOrNull { it.isBackground }
-        if (background != null && callRead.scenarioTag != null) {
-            collectVariablesFromResolvedScenario(background, variables, visitedFiles, depth, fileName, "Background")
-        }
-        
-        // Process the referenced scenarios
-        for (scenario in resolved.scenarios) {
-            collectVariablesFromResolvedScenario(scenario, variables, visitedFiles, depth, fileName, scenario.tag)
-        }
-        
-        visitedFiles.remove(fileKey)
-    }
-
-    /**
-     * Collect variables from a resolved scenario info
-     */
-    private fun collectVariablesFromResolvedScenario(
-        scenarioInfo: KarateTreeParser.ScenarioInfo,
-        variables: MutableSet<VariableInfo>,
-        visitedFiles: MutableSet<String>,
-        depth: Int,
-        fileName: String,
-        scenarioTag: String?
-    ) {
-        for (step in scenarioInfo.steps) {
-            // Extract def statements
-            extractDefStatements(step.text, variables, fileName, scenarioTag)
-            
-            // Recursively process nested call reads
-            for (nestedCallRead in step.callReads) {
-                resolveAndCollectVariables(nestedCallRead, variables, visitedFiles, depth + 1)
-            }
-        }
-    }
-
-    /**
      * Find the scenario that contains the given offset
      */
     fun findScenarioAtOffset(file: GherkinFile, offset: Int): PsiElement? {
@@ -364,5 +198,38 @@ class KarateVariableExtractor(private val project: Project) {
         }
         
         return null
+    }
+
+    private fun extractVariablesFromFile(file: GherkinFile): Set<VariableInfo> {
+        val variables = mutableSetOf<VariableInfo>()
+        val fileName = file.name
+
+        val background = PsiTreeUtil.findChildrenOfType(file, GherkinScenario::class.java)
+            .firstOrNull { it.firstChild?.text?.trim()?.lowercase()?.startsWith("background") == true }
+
+        if (background != null) {
+            collectDefVariablesFromScenario(background, variables, fileName, "Background")
+        }
+
+        val scenarios = PsiTreeUtil.findChildrenOfType(file, GherkinScenario::class.java).toList() +
+            PsiTreeUtil.findChildrenOfType(file, GherkinScenarioOutline::class.java).toList()
+
+        for (scenarioElement in scenarios) {
+            val keyword = scenarioElement.firstChild?.text?.trim()?.lowercase()
+            if (keyword == "background" || keyword == "background:") continue
+            collectDefVariablesFromScenario(
+                scenarioElement,
+                variables,
+                fileName,
+                extractScenarioTag(scenarioElement)
+            )
+        }
+
+        return variables
+    }
+
+    companion object {
+        fun getInstance(project: Project): KarateVariableExtractor =
+            project.getService(KarateVariableExtractor::class.java)
     }
 }

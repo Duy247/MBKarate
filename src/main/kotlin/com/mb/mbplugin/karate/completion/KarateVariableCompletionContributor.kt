@@ -38,7 +38,7 @@ class KarateVariableCompletionProvider : CompletionProvider<CompletionParameters
         if (!settings.isEnabled) return
         
         val offset = parameters.offset
-        val extractor = KarateVariableExtractor(project)
+        val extractor = KarateVariableExtractor.getInstance(project)
         
         // Find the scenario containing the cursor
         val scenario = extractor.findScenarioAtOffset(file, offset) ?: return
