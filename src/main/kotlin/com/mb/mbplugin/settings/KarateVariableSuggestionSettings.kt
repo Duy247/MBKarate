@@ -21,7 +21,8 @@ class KarateVariableSuggestionSettings : PersistentStateComponent<KarateVariable
             "^\\s*(?:\\*|Given|When|Then|And|But)\\s+create\\s+variable\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s+with\\s+value",
             "^\\s*(?:\\*|Given|When|Then|And|But)\\s+def\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*\\{",
             "karate\\.set\\s*\\(\\s*['\"]([a-zA-Z_][a-zA-Z0-9_]*)['\"]\\s*,"
-        )
+        ),
+        var sourceFiles: MutableList<String> = mutableListOf()
     )
     
     private var myState = State()
@@ -42,6 +43,12 @@ class KarateVariableSuggestionSettings : PersistentStateComponent<KarateVariable
         get() = myState.patterns
         set(value) {
             myState.patterns = value
+        }
+
+    var sourceFiles: MutableList<String>
+        get() = myState.sourceFiles
+        set(value) {
+            myState.sourceFiles = value
         }
     
     companion object {

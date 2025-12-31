@@ -9,6 +9,7 @@ import org.jetbrains.plugins.cucumber.psi.GherkinFile
 import org.jetbrains.plugins.cucumber.psi.GherkinScenario
 import org.jetbrains.plugins.cucumber.psi.GherkinScenarioOutline
 import org.jetbrains.plugins.cucumber.psi.GherkinStep
+import java.util.Locale
 import java.util.regex.Pattern
 
 /**
@@ -24,6 +25,7 @@ class KarateVariableExtractor(private val project: Project) {
     )
 
     private val cacheByPath = mutableMapOf<String, CachedFile>()
+    private val cacheBySourcePath = mutableMapOf<String, CachedFile>()
     
     /**
      * Get compiled patterns from settings
@@ -86,6 +88,30 @@ class KarateVariableExtractor(private val project: Project) {
         }
 
         for (cached in cacheByPath.values) {
+            variables.addAll(cached.variables)
+        }
+
+        val sourcePaths = settings.sourceFiles.toList()
+        val seenSourcePaths = mutableSetOf<String>()
+        for (path in sourcePaths) {
+            val vFile = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(path) ?: continue
+            seenSourcePaths.add(path)
+            val fileStamp = vFile.modificationStamp
+            val cached = cacheBySourcePath[path]
+            if (cached == null || cached.stamp != fileStamp) {
+                val extracted = extractVariablesFromSourceFile(vFile)
+                cacheBySourcePath[path] = CachedFile(fileStamp, extracted)
+            }
+        }
+
+        if (cacheBySourcePath.isNotEmpty()) {
+            val removed = cacheBySourcePath.keys - seenSourcePaths
+            for (path in removed) {
+                cacheBySourcePath.remove(path)
+            }
+        }
+
+        for (cached in cacheBySourcePath.values) {
             variables.addAll(cached.variables)
         }
 
@@ -226,6 +252,58 @@ class KarateVariableExtractor(private val project: Project) {
         }
 
         return variables
+    }
+
+    private fun extractVariablesFromSourceFile(file: com.intellij.openapi.vfs.VirtualFile): Set<VariableInfo> {
+        val variables = mutableSetOf<VariableInfo>()
+        val fileName = file.name
+        val text = try {
+            com.intellij.openapi.vfs.VfsUtilCore.loadText(file)
+        } catch (e: Exception) {
+            return variables
+        }
+
+        when (file.extension?.lowercase(Locale.ROOT)) {
+            "js" -> extractFromJs(text, variables, fileName)
+            "java" -> extractFromJava(text, variables, fileName)
+        }
+
+        return variables
+    }
+
+    private fun extractFromJs(text: String, variables: MutableSet<VariableInfo>, fileName: String) {
+        val patterns = listOf(
+            Pattern.compile("\\b(?:var|let|const)\\s+([a-zA-Z_][a-zA-Z0-9_]*)", Pattern.MULTILINE),
+            Pattern.compile("karate\\.set\\s*\\(\\s*['\"]([a-zA-Z_][a-zA-Z0-9_]*)['\"]\\s*,", Pattern.MULTILINE)
+        )
+
+        for (pattern in patterns) {
+            val matcher = pattern.matcher(text)
+            while (matcher.find()) {
+                val varName = matcher.group(1)
+                if (varName.isNotEmpty()) {
+                    variables.add(VariableInfo(varName, fileName, null))
+                }
+            }
+        }
+    }
+
+    private fun extractFromJava(text: String, variables: MutableSet<VariableInfo>, fileName: String) {
+        val javaPattern = Pattern.compile(
+            "\\b(?:public|protected|private|static|final|transient|volatile|\\s)*" +
+                "(?:byte|short|int|long|float|double|boolean|char|String|[A-Z][A-Za-z0-9_]*)" +
+                "(?:\\s*<[^;=(){}]+>)?" +
+                "(?:\\s*\\[\\])?\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?:=|;|,)",
+            Pattern.MULTILINE
+        )
+
+        val matcher = javaPattern.matcher(text)
+        while (matcher.find()) {
+            val varName = matcher.group(1)
+            if (varName.isNotEmpty()) {
+                variables.add(VariableInfo(varName, fileName, null))
+            }
+        }
     }
 
     companion object {
