@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.5.0"
+version = "1.5.1"
 
 repositories {
     mavenLocal()    
@@ -44,10 +44,9 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.5.0</h3>
+            <h3>Version 1.5.1</h3>
             <ul>
-              <li>Minor change: extend call read go to definition</li>
-              <li>Major change: add variable suggestion</li>
+              <li>Minor change: variable suggestion now accept JS and Java files in setting</li>
             </ul>
         """.trimIndent()
     }
