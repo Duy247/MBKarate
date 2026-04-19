@@ -176,7 +176,7 @@ class ShortPlaybookPanel(private val project: Project) : JPanel(BorderLayout()),
      */
     private fun refreshPlaybook() {
         ApplicationManager.getApplication().executeOnPooledThread {
-            val entries = com.intellij.openapi.application.ReadAction.compute<List<ShortPlaybookEntry>, RuntimeException> {
+            val entries = ApplicationManager.getApplication().runReadAction<List<ShortPlaybookEntry>> {
                 scanner.scanForShortDescriptions()
             }
             

@@ -96,14 +96,7 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
                 if (trigger.prefix.isNotBlank() && trigger.prefix.contains(short, ignoreCase = true)) return@forEach
                 
                 val normPath = getRelativePath(project, vf).replace("\\", "/")
-                val paramInputs = parsed.params.filter { p ->
-                    val tags = p.tags.map { it.lowercase() }
-                    "input" in tags && "required" in tags
-                }.map { it.name }
-                
-                val paramBlock = if (paramInputs.isNotEmpty()) {
-                    paramInputs.joinToString(", ", prefix = " { ", postfix = " }") { "$it: ''" }
-                } else ""
+                val paramBlock = buildParamBlock(extractRequiredInputParams(parsed.params))
                 
                 val callLine = "* call read('classpath:$normPath@$scenarioTag')$paramBlock"
                 val fullSuggestion = buildSuggestion(parsed.snippetBefore, callLine, parsed.snippetAfter)
@@ -168,9 +161,7 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         
         val docInfo = extractDocInfoWithShort(psiFile, tagData.tag, docProvider)
         
-        val paramBlock = if (docInfo.paramInputs.isNotEmpty()) {
-            docInfo.paramInputs.joinToString(", ", prefix = " { ", postfix = " }") { "$it: ''" }
-        } else ""
+        val paramBlock = buildParamBlock(docInfo.paramInputs)
         
         val callLine = "* call read('classpath:$normPath@${tagData.tag}')$paramBlock"
         val fullSuggestion = buildSuggestion(docInfo.snippetBefore, callLine, docInfo.snippetAfter)
@@ -209,10 +200,7 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         if (docText.isNullOrBlank()) return Triple(null, null, emptyList())
         
         val parsed = docProvider.parseDocDirectives(docText)
-        val paramInputs = parsed.params.filter { param ->
-            val tagsLower = param.tags.map { it.lowercase() }
-            "input" in tagsLower && "required" in tagsLower
-        }.map { it.name }
+        val paramInputs = extractRequiredInputParams(parsed.params).map { it.name }
         
         return Triple(parsed.snippetBefore, parsed.snippetAfter, paramInputs)
     }
@@ -223,20 +211,63 @@ class KarateTagCompletionProvider : CompletionProvider<CompletionParameters>() {
         if (docText.isNullOrBlank()) return ExtractedDocInfo(null, null, emptyList(), null)
         
         val parsed = docProvider.parseDocDirectives(docText)
-        val paramInputs = parsed.params.filter { param ->
-            val tagsLower = param.tags.map { it.lowercase() }
-            "input" in tagsLower && "required" in tagsLower
-        }.map { it.name }
+        val paramInputs = extractRequiredInputParams(parsed.params)
         
         return ExtractedDocInfo(parsed.snippetBefore, parsed.snippetAfter, paramInputs, parsed.shortDescription)
     }
     
+    data class InputParam(
+        val name: String,
+        val defaultValue: String?
+    )
+
     data class ExtractedDocInfo(
         val snippetBefore: String?,
         val snippetAfter: String?,
-        val paramInputs: List<String>,
+        val paramInputs: List<InputParam>,
         val shortDescription: String?
     )
+
+    private fun extractRequiredInputParams(
+        params: List<KarateFeatureDocumentationProvider.ParamEntry>
+    ): List<InputParam> {
+        return params.filter { param ->
+            hasTag(param.tags, "input") && hasTag(param.tags, "required")
+        }.map { param ->
+            InputParam(param.name, extractDefaultTagValue(param.tags))
+        }
+    }
+
+    private fun hasTag(tags: List<String>, expectedTag: String): Boolean {
+        return tags.any { raw ->
+            val trimmed = raw.trim()
+            trimmed.equals(expectedTag, ignoreCase = true) ||
+                trimmed.substringBefore(':').trim().equals(expectedTag, ignoreCase = true) ||
+                trimmed.split('/').any { part -> part.trim().equals(expectedTag, ignoreCase = true) }
+        }
+    }
+
+    private fun extractDefaultTagValue(tags: List<String>): String? {
+        for (raw in tags) {
+            val trimmed = raw.trim()
+            val separatorIndex = trimmed.indexOf(':')
+            if (separatorIndex <= 0) continue
+
+            val key = trimmed.substring(0, separatorIndex).trim()
+            if (key.equals("default", ignoreCase = true)) {
+                return trimmed.substring(separatorIndex + 1).trim().takeIf { it.isNotEmpty() }
+            }
+        }
+        return null
+    }
+
+    private fun buildParamBlock(params: List<InputParam>): String {
+        if (params.isEmpty()) return ""
+        return params.joinToString(", ", prefix = " { ", postfix = " }") { param ->
+            val value = param.defaultValue ?: "''"
+            "${param.name}: $value"
+        }
+    }
     
     private fun buildSuggestion(before: String?, main: String, after: String?): String = buildString {
         before?.trim()?.takeIf { it.isNotBlank() }?.let {

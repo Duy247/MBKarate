@@ -5,7 +5,8 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.5.1"
+version = "1.5.2"
+val platformVersion = providers.gradleProperty("platformVersion").getOrElse("2025.1.4.1")
 
 repositories {
     mavenLocal()    
@@ -19,7 +20,7 @@ repositories {
 // Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
     intellijPlatform {
-        create("IC", "2025.1.4.1")
+        create("IC", platformVersion)
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
 
         // Add necessary plugin dependencies for compilation
@@ -28,8 +29,8 @@ dependencies {
         bundledPlugin("org.intellij.intelliLang")
         bundledPlugin("JUnit")
         
-        // Add Gherkin plugin as a non-bundled plugin dependency
-        plugin("gherkin:251.14649.49") // Use a version compatible with IntelliJ 2025.1.x
+        // Resolve a Gherkin plugin version compatible with the selected IntelliJ Platform.
+        compatiblePlugin("gherkin")
         
         // The required plugins are defined in plugin.xml
     }
@@ -44,9 +45,11 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.5.1</h3>
+            <h3>Version 1.5.2</h3>
             <ul>
-              <li>Minor change: variable suggestion now accept JS and Java files in setting</li>
+              <li>Minor change: fix API usage to be compatible with 2026.1</li>
+              <li>Minor change: Autocomplete now accept DEFAULT value with tag DEFAULT</li>
+              <li>Minor change: Add new feature: scenario impact change</li>
             </ul>
         """.trimIndent()
     }

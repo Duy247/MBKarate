@@ -41,6 +41,10 @@
         <codeInsight.lineMarkerProvider language="Gherkin"
                                         implementationClass="com.mb.mbplugin.karate.examples.ExamplesTableEditorLineMarkerProvider"/>
         
+        <!-- Scenario Impact Line Marker Provider - shows where a scenario is called via call read -->
+        <codeInsight.lineMarkerProvider language="Gherkin"
+                                        implementationClass="com.mb.mbplugin.karate.navigation.KarateScenarioImpactLineMarkerProvider"/>
+        
         <!-- Karate Feature Documentation Provider -->
         <lang.documentationProvider language="Gherkin"
                                    implementationClass="com.mb.mbplugin.karate.documentation.KarateFeatureDocumentationProvider"/>

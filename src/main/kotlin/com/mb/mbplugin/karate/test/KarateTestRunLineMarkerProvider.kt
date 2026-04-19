@@ -12,7 +12,6 @@ import com.intellij.execution.executors.DefaultRunExecutor
 import com.intellij.execution.junit.JUnitConfiguration
 import com.intellij.execution.junit.JUnitConfigurationType
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.module.ModuleUtil
@@ -316,7 +315,7 @@ class {{CLASS_NAME}} {
 
                     junitConfig.setShortenCommandLine(com.intellij.execution.ShortenCommandLine.ARGS_FILE)
 
-                    val module = ReadAction.compute<com.intellij.openapi.module.Module?, Throwable> {
+                    val module = ApplicationManager.getApplication().runReadAction<com.intellij.openapi.module.Module?> {
                         ModuleUtil.findModuleForFile(virtualFile, project)
                     }
                     if (module != null) {
