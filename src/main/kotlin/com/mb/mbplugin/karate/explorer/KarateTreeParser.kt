@@ -13,13 +13,17 @@ import org.jetbrains.plugins.cucumber.psi.*
 import java.util.regex.Pattern
 
 /**
- * Parser for extracting Karate feature file structure and call read statements
+ * Parser for extracting Karate feature file structure and call statements
  */
 class KarateTreeParser(private val project: Project) {
 
     companion object {
         private val CALL_READ_PATTERN = Pattern.compile(
-            "call\\s+read\\s*\\(\\s*['\"](?:classpath:|src/)?([^'\"]+\\.feature)(?:@(\\w+))?['\"]",
+            "call\\s+read\\s*\\(\\s*['\"](?:classpath:|src/)?([^'\"]+\\.feature)(?:@([\\w.-]+))?['\"]",
+            Pattern.CASE_INSENSITIVE
+        )
+        private val CALL_PATTERN = Pattern.compile(
+            "(?:\\bkarate\\s*\\.\\s*)?call\\s*\\(\\s*['\"](?:classpath:|src/)?([^'\"]+\\.feature)(?:@([\\w.-]+))?['\"]",
             Pattern.CASE_INSENSITIVE
         )
     }
@@ -167,24 +171,34 @@ class KarateTreeParser(private val project: Project) {
     }
 
     /**
-     * Extract call read statements from a step
+     * Extract call statements from a step.
+     * Supports:
+     * - call read('classpath:...feature@tag')
+     * - call('classpath:...feature@tag', ...)
+     * - karate.call('classpath:...feature@tag', ...)
      */
     private fun extractCallReads(stepText: String, stepElement: PsiElement): List<CallReadInfo> {
         val callReads = mutableListOf<CallReadInfo>()
-        val matcher = CALL_READ_PATTERN.matcher(stepText)
+        val seen = mutableSetOf<String>()
+        val patterns = listOf(CALL_READ_PATTERN, CALL_PATTERN)
 
-        while (matcher.find()) {
-            val featurePath = matcher.group(1)
-            val scenarioTag = matcher.group(2)
+        patterns.forEach { pattern ->
+            val matcher = pattern.matcher(stepText)
+            while (matcher.find()) {
+                val featurePath = matcher.group(1)
+                val scenarioTag = matcher.group(2)
+                val dedupeKey = "${matcher.start()}::$featurePath::$scenarioTag"
+                if (!seen.add(dedupeKey)) continue
 
-            callReads.add(
-                CallReadInfo(
-                    featurePath = featurePath,
-                    scenarioTag = scenarioTag,
-                    psiElement = stepElement,
-                    fullCallText = matcher.group()
+                callReads.add(
+                    CallReadInfo(
+                        featurePath = featurePath,
+                        scenarioTag = scenarioTag,
+                        psiElement = stepElement,
+                        fullCallText = matcher.group()
+                    )
                 )
-            )
+            }
         }
 
         return callReads
