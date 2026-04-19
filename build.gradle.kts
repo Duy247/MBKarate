@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.mb"
-version = "1.5.2"
+version = "1.6.0"
 val platformVersion = providers.gradleProperty("platformVersion").getOrElse("2025.1.4.1")
 
 repositories {
@@ -45,7 +45,7 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h3>Version 1.5.2</h3>
+            <h3>Version 1.6.0</h3>
             <ul>
               <li>Minor change: fix API usage to be compatible with 2026.1</li>
               <li>Minor change: Autocomplete now accept DEFAULT value with tag DEFAULT</li>

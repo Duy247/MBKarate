@@ -12,24 +12,22 @@
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-        For Karate framework support in IntelliJ IDEA.
+        Productivity plugin for <b>Karate + Gherkin</b> workflows in IntelliJ IDEA.
         <br><br>
-            Features:
-               <ul>
-                    <li>Go to Definition for call read</li>
-                    <li>Indexing and Autocomplete for call read (file and scenario tags)</li>
-                    <li>Documentation View with param, return, snippet, short syntax</li>
-                    <li>Error check for missing param in call read, and wrong file path</li>
-                    <li>Jira Issue Integration with gutter icons</li>
-                    <li>Custom Test Execution</li>
-                    <li>cURL import</li>
-                    <li>Edit Examples table with GUI</li>
-               </ul>
-          <br><br>
-          This plugin utilizes the standard Gherkin/Cucumber plugins for syntax highlighting and formatting,
-          while providing specialized features for Karate test automation.
-          <br><br>
-          Specifically made for App Team's MB project
+        Main capabilities:
+        <ul>
+            <li>Go to declaration for <code>call read(...)</code>, classpath/src paths, and related file references</li>
+            <li>Smart completion for file/tag/short triggers (<code>#</code>, <code>!</code>, <code>&amp;</code>)</li>
+            <li>Documentation hover for scenario doc blocks (<code>@short</code>, <code>@param</code>, <code>@return</code>, snippets)</li>
+            <li>Validation for missing required input params in <code>call read(...)</code> and unresolved file paths</li>
+            <li>Scenario Impact gutter + graph to inspect scenario reuse chains</li>
+            <li>Custom Run/Debug generation via configurable Karate test runner templates</li>
+            <li>Jira tag integration (gutter + intentions)</li>
+            <li>cURL import to Karate feature format</li>
+            <li>Examples table spreadsheet editor</li>
+            <li>Karate Tree Explorer and Short Playbook tool windows</li>
+        </ul>
+        Built for MB Bank automation teams while staying compatible with standard Gherkin/Cucumber behavior.
     ]]></description>
 
     <!-- Product and plugin compatibility requirements.
